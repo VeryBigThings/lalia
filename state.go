@@ -28,6 +28,7 @@ type State struct {
 	anyWaiter map[string]chan anyMsg
 
 	writes chan writeOp
+	queue  *Queue
 	wg     sync.WaitGroup
 	stop   chan struct{}
 }
@@ -48,6 +49,11 @@ func newState() (*State, error) {
 	if err := ensureWorkspace(); err != nil {
 		return nil, err
 	}
+	q, err := openQueue(leschDir())
+	if err != nil {
+		return nil, fmt.Errorf("write queue: %w", err)
+	}
+	s.queue = q
 	if err := s.loadRegistry(); err != nil {
 		return nil, err
 	}
