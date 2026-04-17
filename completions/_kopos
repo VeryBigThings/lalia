@@ -1,0 +1,179 @@
+#compdef kopos
+# zsh completion for kopos — managed by the kopos repo; reinstalled by
+# `make install`.
+
+_kopos_agents() {
+    local -a names
+    names=(${(f)"$(kopos agents 2>/dev/null | awk '{print $1}')"})
+    _describe -t agents 'agent' names
+}
+
+_kopos_rooms_list() {
+    local -a rooms
+    rooms=(${(f)"$(kopos rooms 2>/dev/null | awk '{print $1}')"})
+    _describe -t rooms 'room' rooms
+}
+
+_kopos() {
+    local curcontext="$curcontext" state line
+    typeset -A opt_args
+
+    _arguments -C \
+        '1: :->cmd' \
+        '*:: :->args'
+
+    case "$state" in
+        cmd)
+            local -a commands
+            commands=(
+                'register:register caller with the daemon'
+                'unregister:drop this registration'
+                'init:print role bootstrap prompt to stdout'
+                'prompt:alias of init (stdout-only)'
+                'run:exec a harness with the role prompt wired in'
+                'agents:list registered agents'
+                'nickname:manage address nicknames'
+                'rooms:list rooms (or rooms gc)'
+                'room:room subcommands (create)'
+                'join:join a room'
+                'leave:leave a room'
+                'participants:list room members'
+                'post:broadcast to a room'
+                'tell:one-way message to a peer'
+                'ask:send to a peer, block for reply'
+                'read:consume next inbound from peer or room'
+                'peek:inspect pending without consuming'
+                'read-any:block until any channel or room delivers'
+                'channels:list your peer channels'
+                'history:transcript for a peer or room'
+                'plan:plan subcommands (supervisor/worker roles)'
+                'renew:extend caller lease'
+                'stop:shut down the daemon'
+                'protocol:print agent-facing protocol guide'
+                'help:show usage'
+                '--version:print binary version'
+            )
+            _describe -t commands 'kopos command' commands
+            ;;
+        args)
+            case "$words[1]" in
+                rooms)
+                    local -a subs
+                    subs=('gc:archive merged-assignment rooms in plans you supervise')
+                    _describe -t subs 'rooms subcommand' subs
+                    ;;
+                room)
+                    _arguments \
+                        '1:subcommand:(create)' \
+                        '--desc[room description]:desc:'
+                    ;;
+                init|prompt)
+                    _arguments '1:role:(worker supervisor)'
+                    ;;
+                run)
+                    _arguments \
+                        '1:role:(worker supervisor)' \
+                        '*:harness flag:(--claude-code --codex --copilot --force)'
+                    ;;
+                register)
+                    _arguments \
+                        '--name[caller name]:name:' \
+                        '--as[override caller identity]:name:' \
+                        '--role[caller role]:role:(supervisor worker)' \
+                        '--harness[harness id]:harness:' \
+                        '--model[model id]:model:' \
+                        '--project[project id]:project:'
+                    ;;
+                nickname)
+                    _arguments \
+                        '--follow[bind to address resolution, not agent_id]' \
+                        '-d[delete nickname]:nickname:'
+                    ;;
+                join|leave|participants)
+                    _kopos_rooms_list
+                    ;;
+                post)
+                    _arguments \
+                        '1:room:_kopos_rooms_list' \
+                        '2:body:' \
+                        '--as[override caller]:name:'
+                    ;;
+                tell|ask)
+                    _arguments \
+                        '1:peer:_kopos_agents' \
+                        '2:body:' \
+                        '--timeout[seconds]:timeout:' \
+                        '--as[override caller]:name:'
+                    ;;
+                read|peek)
+                    _arguments \
+                        '1:peer or room:' \
+                        '--room[target is a room]' \
+                        '--timeout[seconds]:timeout:' \
+                        '--as[override caller]:name:'
+                    ;;
+                read-any)
+                    _arguments \
+                        '--timeout[seconds]:timeout:' \
+                        '--as[override caller]:name:'
+                    ;;
+                history)
+                    _arguments \
+                        '1:peer or room:' \
+                        '--room[target is a room]' \
+                        '--since[seq]:seq:' \
+                        '--limit[N]:N:'
+                    ;;
+                plan)
+                    _arguments -C \
+                        '1:subcommand:(create assign unassign status claim show list handoff)' \
+                        '*:: :->planargs'
+                    case "$state" in
+                        planargs)
+                            case "$words[1]" in
+                                assign)
+                                    _arguments \
+                                        '1:slug:' \
+                                        '2:agent:_kopos_agents' \
+                                        '--worktree[path]:path:_files -/' \
+                                        '--goal[text]:text:' \
+                                        '--kickoff[text]:text:' \
+                                        '--project[id]:id:'
+                                    ;;
+                                create)
+                                    _arguments \
+                                        '1:slug:' \
+                                        '--goal[text]:text:' \
+                                        '--project[id]:id:'
+                                    ;;
+                                status)
+                                    _arguments \
+                                        '1:slug:' \
+                                        '2:status:(open assigned in-progress ready blocked merged)' \
+                                        '--project[id]:id:'
+                                    ;;
+                                claim)
+                                    _arguments \
+                                        '1:slug:' \
+                                        '--worktree[path]:path:_files -/' \
+                                        '--project[id]:id:'
+                                    ;;
+                                unassign)
+                                    _arguments '1:slug:' '--project[id]:id:'
+                                    ;;
+                                handoff)
+                                    _arguments '1:new-supervisor:_kopos_agents' '--project[id]:id:'
+                                    ;;
+                                show|list)
+                                    _arguments '--project[id]:id:'
+                                    ;;
+                            esac
+                            ;;
+                    esac
+                    ;;
+            esac
+            ;;
+    esac
+}
+
+_kopos "$@"
