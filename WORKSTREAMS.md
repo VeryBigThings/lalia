@@ -41,7 +41,7 @@ list so any restarting session can recover context.
 
 | Agent | Branch | Workstream | Worktree path | Status |
 |-------|--------|------------|---------------|--------|
-| Claude Code (me) | `feat/identity` | A. Identity refactor + nicknames | `~/Obolos/lesche-identity` | Not started |
+| Claude Code | `feat/identity` | A. Identity refactor + nicknames | `~/Obolos/lesche-identity` | Not started |
 | GPT-5 via Codex | `feat/rooms` | B. Room mode (N-party) | `~/Obolos/lesche-rooms` | Not started. Rebase from `main@2cabb6a` on start. |
 | Copilot (to be booted) | `feat/write-queue` | C. SQLite write queue | `~/Obolos/lesche-write-queue` | Blocked on three open questions below. |
 
