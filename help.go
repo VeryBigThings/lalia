@@ -7,14 +7,23 @@ first call. Running "lesche protocol" prints this message.
 
 ## Mental model
 
-There are two transports:
+There are two transports, and the choice matters more than you'd
+guess:
 
-- **Channels** — 2-party, peer-to-peer. One persistent channel per pair.
-  No turn-taking: either side may send at any time. Either side reads
-  their mailbox when they want. The pair (you, peer) IS the handle;
-  there are no session IDs.
-- **Rooms** — N-party pub/sub. Named, explicit membership, bounded
-  mailbox per subscriber with drop-oldest overflow.
+- **Rooms** — N-party pub/sub, named, explicit membership. This is
+  the default for feature/workstream coordination. A room per active
+  slug (e.g. "feat/identity") holds the full transcript of work on
+  that slug, so reviewers and inheritors can join and replay context.
+  Kill your harness, come back later, 'history <slug> --room'
+  reconstructs the thread.
+- **Channels** — 2-party, peer-to-peer. Use these only for private
+  1:1 problem-solving: identity questions, a worker pinging the
+  manager about something genuinely personal, the odd debugging
+  aside. If the conversation is about a specific workstream, it
+  belongs in that workstream's room, not a channel.
+
+Default to rooms for anything work-related. Reach for channels only
+when privacy actually matters.
 
 ## Identity
 
@@ -54,13 +63,17 @@ Explicit shutdown:
 ## Vocabulary — map your human's intent to a command
 
 When the human tells you what to do, parse their verb, not the peer name.
+Default target is the slug's room; reach for a peer channel only when
+the human is pointing you at a named individual for a private reason.
 
 | They say                                    | You run                    |
 |---------------------------------------------|----------------------------|
-| "tell / notify / inform / publish to X"     | lesche tell X "..."        |
-| "ask / check with / query / find out from X"| lesche ask X "..." --timeout N |
-| "negotiate / discuss / coordinate with X"   | loop: ask X → read reply → ask X … |
-| "post / announce to the room"               | lesche post R "..."        |
+| "status on feat/X" / "update the feat/X team" | lesche post feat/X "..." |
+| "announce to the room"                      | lesche post R "..."        |
+| "what's happening on feat/X"                | lesche read feat/X --room  |
+| "privately tell X / dm X"                   | lesche tell X "..."        |
+| "privately ask X"                           | lesche ask X "..." --timeout N |
+| "negotiate / discuss / coordinate privately with X" | loop: ask X → read reply → ask X … |
 | "wait for a message"                        | lesche read X --timeout 300|
 | "anything for me?"                          | lesche peek X              |
 | "check all channels/rooms"                  | lesche read-any --timeout 300 |

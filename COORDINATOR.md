@@ -61,6 +61,25 @@ touch**, cross-check them against the heat map, and if you see
 collisions announce them via `tell claude-coordinator "..."` before
 writing.
 
+## Coordination default: rooms for feature work
+
+For any active feature/workstream, coordination happens in a room
+named after the slug (`feat/identity`, `feat/errors`, …). Manager
+and assigned worker are members; other agents (reviewers, future
+inheritors, onlookers needing context) can join to peek. The room's
+git transcript survives session kills — kill a harness, come back
+the next day, `lesche history <slug> --room` replays the thread.
+
+Direct peer-to-peer channels (`tell` / `ask`) are the edge case:
+private 1:1 problem-solving, identity questions, anything the rest
+of the project genuinely shouldn't see. If the conversation is about
+a specific workstream, it probably belongs in the slug's room.
+
+Today this is manual — the manager runs `lesche room create <slug>`
+then `lesche join <slug>` and tells the worker to join. Workstream H
+will automate it (rooms auto-created by `plan assign`, owner auto-
+joined on `plan claim`).
+
 ## If you are a worker agent — bootstrap
 
 You are a worker if the human told you "you are a worker" or
