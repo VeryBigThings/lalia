@@ -451,16 +451,23 @@ requirements, and any sequencing constraints.
 ### I. `lesche init` + `lesche run` harness integration  **← top of queue**
 
 **Goal**: Onboard a worker or supervisor agent into a lesche-
-coordinated session with one command. `lesche init <role>` emits a
-role-specific system prompt (stdout). `lesche run <role> --<harness>
-[...args]` writes the prompt where the harness reads it and spawns
-the harness with the args forwarded. Also: cascade the manager →
-supervisor rename through docs and workstream H spec before H
-starts.
+coordinated session with one command. Three-level surface, same
+prompt content underneath:
+- `lesche init <role>` — emit the role prompt to stdout (pipe,
+  inspect, diff).
+- `lesche prompt <role>` — write the prompt to `./LESCHE.md` in
+  cwd. Happy-path convenience when the human will wire the harness
+  up themselves.
+- `lesche run <role> --<harness> [...args]` — write the prompt to
+  the harness's preferred location and exec the harness with args
+  forwarded.
+
+Also: cascade the manager → supervisor rename through docs and
+workstream H's spec before H starts.
 
 **Scope**:
-- New commands: `lesche init worker`, `lesche init supervisor`,
-  `lesche run worker --<harness>`, `lesche run supervisor --<harness>`.
+- New commands: `lesche init`, `lesche prompt`, `lesche run`, each
+  with `worker` | `supervisor` subcommand.
 - Embedded prompts via `//go:embed`: `prompts/worker.md`,
   `prompts/supervisor.md`. Edit these as markdown, print verbatim.
 - Both prompts follow the 5-part skeleton: role posture, three
@@ -494,14 +501,18 @@ cascade — edit in same commit, not a follow-up).
 
 **Tests**:
 - `lesche init worker` stdout matches embedded file byte-for-byte.
+- `lesche prompt worker` writes `./LESCHE.md` with the same content;
+  refuses to overwrite an existing file without `--force` unless the
+  file carries a lesche-written marker on the first line.
 - `lesche run worker --claude-code` with stubbed `claude` on PATH
   writes LESCHE.md and execs with the expected flag set.
 - `lesche run worker --codex` stub test likewise.
 - `lesche run worker --copilot` without `--force` on an existing
   `.github/copilot-instructions.md` (without lesche marker) errors
   before touching the file.
-- No daemon calls: both commands work with no running daemon.
-- Cold exec: `lesche init` succeeds before `lesche register`.
+- No daemon calls: all three commands work with no running daemon.
+- Cold exec: `lesche init` / `prompt` / `run` succeed before
+  `lesche register`.
 
 **Blockers**: None. Pure client-side. Does not touch `state.go`,
 `channel.go`, `room.go`, or any daemon internals.
