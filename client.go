@@ -59,6 +59,21 @@ func request(op string, args map[string]any) (*Response, error) {
 	}
 	defer conn.Close()
 
+	// Sign the request if it carries a caller identity and we have the
+	// key on disk. register/agents/stop are signature-exempt on the
+	// daemon side; skip signing them here as well.
+	if from, ok := args["from"].(string); ok && from != "" && op != "register" && op != "agents" && op != "stop" {
+		priv, err := loadPrivateKey(from)
+		if err != nil {
+			return nil, fmt.Errorf("load key for %s: %w", from, err)
+		}
+		sig, err := signRequest(priv, args)
+		if err != nil {
+			return nil, fmt.Errorf("sign: %w", err)
+		}
+		args["sig"] = sig
+	}
+
 	req := Request{Op: op, Args: args}
 	data, _ := json.Marshal(req)
 	if _, err := fmt.Fprintf(conn, "%s\n", data); err != nil {

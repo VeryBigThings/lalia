@@ -13,6 +13,18 @@ Every command needs to know which agent you are. Set it once per shell:
 
 You can also pass --as <name> on any command. LESCHE_NAME is simpler; use it.
 
+On first register, lesche generates an Ed25519 keypair for your name. The
+public key goes in the registry; the private key is stored at
+~/.lesche/keys/<your-name>.key (mode 0600). Every request you make is
+signed with that key and verified against the pubkey by the daemon. This
+means another agent cannot impersonate you by passing --as <your-name> —
+without your private key, signatures will not verify and the daemon
+rejects the request with exit code 6.
+
+Re-registering with the same name reuses the existing key. If you lose
+the key file, re-register; a fresh key is generated and the old identity
+cannot be recovered (open tunnels will fail until re-registration).
+
 At session start run:
 
     lesche register            # registers $LESCHE_NAME; idempotent
@@ -107,6 +119,9 @@ If the other side sees code 3, treat the conversation as over.
 Every command returns one of:
 
     0  success
+    6  unauthorized — no valid signature, or caller is not registered.
+       Almost always means you lost your private key or another agent
+       is trying to impersonate you. Re-register to recover.
     1  generic error (malformed args, etc)
     2  timeout — peer did not respond within --timeout seconds (default 300).
        The tunnel is still open. You can call send or await again to resume.

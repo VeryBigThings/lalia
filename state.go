@@ -12,6 +12,7 @@ type Agent struct {
 	StartedAt  time.Time `json:"started_at"`
 	LastSeenAt time.Time `json:"last_seen_at"`
 	ExpiresAt  time.Time `json:"expires_at"`
+	Pubkey     string    `json:"pubkey"` // hex-encoded Ed25519 public key
 }
 
 // Lease duration. Any command from the agent renews; sweeper drops expired.
@@ -146,6 +147,29 @@ func (s *State) requestStop() {
 func (s *State) waitWriterDone() { s.wg.Wait() }
 
 func (s *State) dispatch(req Request) Response {
+	// register is unauthenticated by design — first-to-claim binds the pubkey
+	// for that name via ensureKey (which reuses an existing key if present).
+	// every other op that carries `from` must be signed with that pubkey.
+	if req.Op != "register" && req.Op != "stop" && req.Op != "agents" {
+		if from, ok := req.Args["from"].(string); ok && from != "" {
+			s.mu.Lock()
+			a, known := s.agents[from]
+			var pubHex string
+			if known {
+				pubHex = a.Pubkey
+			}
+			s.mu.Unlock()
+			if !known {
+				return Response{Error: "not registered: " + from, Code: CodeUnauthorized}
+			}
+			if pubHex == "" {
+				return Response{Error: "agent " + from + " has no pubkey on file; re-register to acquire one", Code: CodeUnauthorized}
+			}
+			if err := verifyRequest(pubHex, req.Args); err != nil {
+				return Response{Error: "signature rejected: " + err.Error(), Code: CodeUnauthorized}
+			}
+		}
+	}
 	// lease renewal on any request that carries a caller identity
 	if from, ok := req.Args["from"].(string); ok && from != "" {
 		s.renewLease(from)
@@ -185,6 +209,11 @@ func (s *State) opRegister(req Request) Response {
 	if name == "" {
 		return Response{Error: "name required"}
 	}
+	pub, _, err := ensureKey(name)
+	if err != nil {
+		return Response{Error: "keygen failed: " + err.Error()}
+	}
+	pubHex := fmt.Sprintf("%x", pub)
 	now := time.Now()
 	s.mu.Lock()
 	a, ok := s.agents[name]
@@ -195,12 +224,14 @@ func (s *State) opRegister(req Request) Response {
 	a.PID = pid
 	a.LastSeenAt = now
 	a.ExpiresAt = now.Add(leaseTTL)
+	a.Pubkey = pubHex
 	snapshot := *a
 	s.mu.Unlock()
 	s.persistAgent(&snapshot)
 	return Response{OK: true, Data: map[string]any{
 		"name":       name,
 		"expires_at": snapshot.ExpiresAt.Format(time.RFC3339),
+		"pubkey":     pubHex,
 	}}
 }
 

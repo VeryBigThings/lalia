@@ -23,10 +23,11 @@ type Message struct {
 }
 
 const (
-	CodeOK                = 0
-	CodeError             = 1
-	CodeTimeout           = 2
-	CodePeerClosed        = 3
-	CodeNotYourTurn       = 4
-	CodeNotFound          = 5
+	CodeOK           = 0
+	CodeError        = 1
+	CodeTimeout      = 2
+	CodePeerClosed   = 3
+	CodeNotYourTurn  = 4
+	CodeNotFound     = 5
+	CodeUnauthorized = 6 // signature rejected or caller not registered
 )

@@ -7,7 +7,13 @@ import (
 	"path/filepath"
 )
 
+// leschDir returns the per-user lesche runtime directory. Holds the
+// socket, pid file, and private keys. Override with LESCHE_HOME (useful
+// for isolated tests and parallel daemon instances on the same host).
 func leschDir() string {
+	if d := os.Getenv("LESCHE_HOME"); d != "" {
+		return d
+	}
 	home, _ := os.UserHomeDir()
 	return filepath.Join(home, ".lesche")
 }
