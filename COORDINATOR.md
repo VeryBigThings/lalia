@@ -46,7 +46,7 @@ files on top of this.
 6. **`protocol.go`** — wire-level request/response shapes. Currently
    safe to extend additively; workstream F (structured errors) is
    the only task allowed to rework the `Response` shape.
-7. **`help.go`** and run `./lesche protocol` — the agent-facing
+7. **`help.go`** and run `lesche protocol` — the agent-facing
    protocol guide. If your workstream adds a user-visible command,
    you update both.
 8. **`state.go`** — the dispatch switch is the entry point for
@@ -90,17 +90,26 @@ first message.
 
 ### 2. Register
 
-The lesche daemon is already running at `~/.lesche/sock`. Register
-yourself — idempotent, reuses your existing Ed25519 key if you
-registered in a previous session:
+**Use the installed binary at `/opt/homebrew/bin/lesche` (or wherever
+`which lesche` resolves). Do NOT run `./bin/lesche` from your
+worktree, and do NOT set `LESCHE_HOME` or `LESCHE_WORKSPACE` at the
+shell — those are test-only envs that `go test` sets per-test via
+`t.TempDir()`. Every coordination command (`register`, `agents`,
+`tell`, `read-any`, etc.) must talk to the shared production daemon
+at `~/.lesche/sock`.**
+
+Concretely, setting `LESCHE_HOME=/tmp/...` typically fails with
+`bind: operation not permitted` because harness sandboxes block
+unix-socket binds under `/tmp`. The production daemon is already
+running — just register against it.
 
 ```
-./lesche register
-./lesche agents                # sanity-check: see who else is online
+lesche register                # production daemon, prod binary
+lesche agents                  # sanity-check: see who else is online
 ```
 
 If you see `claude-coordinator` in the agents list, the coordinator
-is up and expecting you. If not, wait and re-run `./lesche agents`
+is up and expecting you. If not, wait and re-run `lesche agents`
 every minute or so until it shows up.
 
 ### 3. Announce yourself
@@ -116,7 +125,7 @@ Tell the coordinator, in one message, exactly these things:
   for `feat/identity`).
 
 ```
-./lesche tell claude-coordinator "harness: codex. assigned feat/keychain. COORDINATOR.md read. no blockers."
+lesche tell claude-coordinator "harness: codex. assigned feat/keychain. COORDINATOR.md read. no blockers."
 ```
 
 No tunnel to open, no sid to track. Your channel with the coordinator
@@ -128,7 +137,7 @@ The coordinator may send you a message before you send one to them.
 To receive anything arriving on any channel or room you're in:
 
 ```
-./lesche read-any --timeout 300
+lesche read-any --timeout 300
 # prints kind=peer target=claude-coordinator (or kind=room target=…)
 # then the message body
 ```
@@ -137,19 +146,19 @@ To receive anything arriving on any channel or room you're in:
 Reply to a peer with:
 
 ```
-./lesche tell claude-coordinator "<your reply>"
+lesche tell claude-coordinator "<your reply>"
 ```
 
 Or if you want to pull from just one specific peer:
 
 ```
-./lesche read claude-coordinator --timeout 300
+lesche read claude-coordinator --timeout 300
 ```
 
 Need a synchronous question-and-answer in one call? Use `ask`:
 
 ```
-./lesche ask claude-coordinator "can I rebase on main now?" --timeout 60
+lesche ask claude-coordinator "can I rebase on main now?" --timeout 60
 ```
 
 `ask` sends, then blocks for the peer's next message and prints it
@@ -161,7 +170,7 @@ Leases are 60 minutes; any command renews. If your harness sits idle
 for longer than that, you get dropped and any blocking read returns
 immediately. Two habits that prevent this:
 
-- Call `./lesche renew` right before a long run of edits.
+- Call `lesche renew` right before a long run of edits.
 - Or just run any lesche command occasionally — they all renew.
 
 ### 6. Announce key moments
@@ -182,11 +191,11 @@ Worker session template; safe to run verbatim after step 1:
 
 ```
 export LESCHE_NAME=<your-name>
-./lesche register
-./lesche agents | grep claude-coordinator || echo "coordinator not up"
-./lesche channels                       # who do I already have a channel with?
-./lesche peek claude-coordinator        # anything pending?
-./lesche read-any --timeout 60          # or block for the first inbound
+lesche register
+lesche agents | grep claude-coordinator || echo "coordinator not up"
+lesche channels                       # who do I already have a channel with?
+lesche peek claude-coordinator        # anything pending?
+lesche read-any --timeout 60          # or block for the first inbound
 ```
 
 If `read-any` times out and `peek` shows nothing, push first with
@@ -195,7 +204,7 @@ If `read-any` times out and `peek` shows nothing, push first with
 ## How to coordinate (general)
 
 All agents coordinate through lesche itself. Full protocol guide:
-run `./lesche protocol`. Full help: `./lesche help`.
+run `lesche protocol`. Full help: `lesche help`.
 
 ## Current state (snapshot at commit 9d192bf)
 
@@ -340,7 +349,7 @@ changes. Your footprint is `signing.go` + one new file + a help
 paragraph. If you find yourself editing anything else, stop and
 `ask claude-coordinator`.
 
-Everyone: before writing, run `./lesche protocol` to see the
+Everyone: before writing, run `lesche protocol` to see the
 agent-facing guide verbatim, and `make test` to confirm the baseline
 suite (32 tests, ~2.2s) is green on your branch.
 
@@ -573,12 +582,19 @@ a short design doc first when that batch starts.
 
 1. **Branch from main. Worktree at `~/Obolos/lesche-<slug>`.**
    `git worktree add -b feat/<slug> ../lesche-<slug> main`.
-2. **Use isolated runtime for your own testing.** Set
-   `LESCHE_HOME=~/.lesche-<slug>` and
-   `LESCHE_WORKSPACE=/tmp/lesche-<slug>/workspace` so your test daemon
-   does not disturb the shared production daemon at `~/.lesche/sock`.
+2. **Coordination uses the production daemon.** Always. That means
+   the installed binary (`/opt/homebrew/bin/lesche` or whatever
+   `which lesche` resolves) against the socket at `~/.lesche/sock`.
+   Do NOT set `LESCHE_HOME` or `LESCHE_WORKSPACE` at the shell. Do
+   NOT run `./bin/lesche` from your worktree. Isolation for tests is
+   handled per-test by `t.Setenv("LESCHE_WORKSPACE", t.TempDir())`
+   inside Go test code — not at the shell. Running coordination
+   commands with `LESCHE_HOME=/tmp/...` typically fails with
+   `bind: operation not permitted` because harness sandboxes block
+   unix-socket binds under `/tmp`.
 3. **Tests must pass before you report done.** Run `make test`. If it
-   fails, do not report done.
+   fails, do not report done. Never run `./bin/lesche` manually —
+   `make test` is the only way your branch's binary executes.
 4. **`protocol.go` struct shapes are owned by workstream F** this
    batch. If you are not F, add fields additively only. F is allowed
    to rework `Response`.
