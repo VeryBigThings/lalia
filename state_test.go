@@ -9,6 +9,7 @@ import (
 func newFixtureState() *State {
 	return &State{
 		agents:    make(map[string]*Agent),
+		nameIdx:   make(map[string]string),
 		channels:  make(map[string]*Channel),
 		rooms:     make(map[string]*Room),
 		anyWaiter: make(map[string]chan anyMsg),
@@ -38,7 +39,12 @@ func TestStateRegisterRenewAgents(t *testing.T) {
 	}
 
 	s.mu.Lock()
-	s.agents["alice"].ExpiresAt = time.Now().Add(-time.Second)
+	a := s.agentByName("alice")
+	if a == nil {
+		s.mu.Unlock()
+		t.Fatalf("alice not found after register")
+	}
+	a.ExpiresAt = time.Now().Add(-time.Second)
 	s.mu.Unlock()
 
 	renew := s.opRenew(Request{Args: map[string]any{"from": "alice"}})
@@ -256,8 +262,14 @@ func TestStateSweepExpiresAgentAndReleasesWaiter(t *testing.T) {
 	s := newFixtureState()
 	now := time.Now()
 
-	s.agents["alice"] = &Agent{Name: "alice", ExpiresAt: now.Add(-time.Second), LastSeenAt: now.Add(-time.Minute)}
-	s.agents["bob"] = &Agent{Name: "bob", ExpiresAt: now.Add(time.Hour), LastSeenAt: now}
+	aliceID := "01ALICE00000000000000000000"
+	bobID := "01BOB000000000000000000000"
+	s.mu.Lock()
+	s.agents[aliceID] = &Agent{AgentID: aliceID, Name: "alice", ExpiresAt: now.Add(-time.Second), LastSeenAt: now.Add(-time.Minute)}
+	s.nameIdx["alice"] = aliceID
+	s.agents[bobID] = &Agent{AgentID: bobID, Name: "bob", ExpiresAt: now.Add(time.Hour), LastSeenAt: now}
+	s.nameIdx["bob"] = bobID
+	s.mu.Unlock()
 	// open channel alice-bob, register alice's waiter manually.
 	ch := s.getOrCreateChannel("alice", "bob")
 
@@ -279,8 +291,8 @@ func TestStateSweepExpiresAgentAndReleasesWaiter(t *testing.T) {
 	}
 
 	s.mu.Lock()
-	_, aliceStill := s.agents["alice"]
-	_, bobStill := s.agents["bob"]
+	aliceStill := s.agentByName("alice") != nil
+	bobStill := s.agentByName("bob") != nil
 	s.mu.Unlock()
 	if aliceStill {
 		t.Fatalf("alice should have been dropped")
@@ -330,9 +342,9 @@ func TestOpUnregisterReleasesWaitersAndEvicts(t *testing.T) {
 	}
 
 	s.mu.Lock()
-	_, stillAgent := s.agents["alice"]
+	aliceStill := s.agentByName("alice") != nil
 	s.mu.Unlock()
-	if stillAgent {
+	if aliceStill {
 		t.Fatalf("alice should have been removed from agents")
 	}
 
@@ -361,8 +373,14 @@ func TestStateSweepEvictsExpiredAgentsFromRooms(t *testing.T) {
 	s := newFixtureState()
 	now := time.Now()
 
-	s.agents["alice"] = &Agent{Name: "alice", ExpiresAt: now.Add(-time.Second), LastSeenAt: now.Add(-time.Minute)}
-	s.agents["bob"] = &Agent{Name: "bob", ExpiresAt: now.Add(time.Hour), LastSeenAt: now}
+	aliceID := "01ALICE00000000000000000000"
+	bobID := "01BOB000000000000000000000"
+	s.mu.Lock()
+	s.agents[aliceID] = &Agent{AgentID: aliceID, Name: "alice", ExpiresAt: now.Add(-time.Second), LastSeenAt: now.Add(-time.Minute)}
+	s.nameIdx["alice"] = aliceID
+	s.agents[bobID] = &Agent{AgentID: bobID, Name: "bob", ExpiresAt: now.Add(time.Hour), LastSeenAt: now}
+	s.nameIdx["bob"] = bobID
+	s.mu.Unlock()
 
 	room := newRoom("ops", "", "alice")
 	room.members["bob"] = true

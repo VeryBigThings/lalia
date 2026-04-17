@@ -116,7 +116,41 @@ func cmdRegister(args []string) {
 		fmt.Fprintln(os.Stderr, "--name or LESCHE_NAME required")
 		os.Exit(1)
 	}
-	resp, err := request("register", map[string]any{"name": name, "pid": os.Getpid()})
+
+	// Auto-detect identity metadata from the caller's environment
+	info := DetectAgentInfo(AgentInfo{
+		Harness: parseFlag(args, "--harness"),
+		Model:   parseFlag(args, "--model"),
+		Project: parseFlag(args, "--project"),
+	})
+
+	reqArgs := map[string]any{
+		"name": name,
+		"pid":  os.Getpid(),
+	}
+	if info.Harness != "" {
+		reqArgs["harness"] = info.Harness
+	}
+	if info.Model != "" {
+		reqArgs["model"] = info.Model
+	}
+	if info.Project != "" {
+		reqArgs["project"] = info.Project
+	}
+	if info.RepoURL != "" {
+		reqArgs["repo_url"] = info.RepoURL
+	}
+	if info.Worktree != "" {
+		reqArgs["worktree"] = info.Worktree
+	}
+	if info.Branch != "" {
+		reqArgs["branch"] = info.Branch
+	}
+	if info.CWD != "" {
+		reqArgs["cwd"] = info.CWD
+	}
+
+	resp, err := request("register", reqArgs)
 	handle(resp, err, func(data any) {
 		fmt.Println(data.(map[string]any)["name"])
 	})
@@ -140,9 +174,17 @@ func cmdUnregister(args []string) {
 func cmdAgents(_ []string) {
 	resp, err := request("agents", nil)
 	handle(resp, err, func(data any) {
-		for _, row := range data.([]any) {
+		rows, ok := data.([]any)
+		if !ok {
+			return
+		}
+		// Print header
+		fmt.Printf("%-26s  %-16s  %-28s  %-12s  %s\n",
+			"agent_id", "name", "qualified", "harness", "started_at")
+		for _, row := range rows {
 			m := row.(map[string]any)
-			fmt.Printf("%s\t%v\t%v\n", m["name"], m["pid"], m["started_at"])
+			fmt.Printf("%-26s  %-16s  %-28s  %-12s  %v\n",
+				m["agent_id"], m["name"], m["qualified"], m["harness"], m["started_at"])
 		}
 	})
 }
