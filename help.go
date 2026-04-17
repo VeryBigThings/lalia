@@ -180,6 +180,18 @@ anything:
 That second "tell" is non-blocking. The turn FSM that used to block
 you after one send is gone.
 
+## Key storage
+
+By default lesche stores private keys as files at ~/.lesche/keys/<name>.key
+(mode 0600). On macOS you can instead store them in the system Keychain:
+
+    export LESCHE_KEYSTORE=keychain
+
+With this set, keys are kept as generic Keychain items (service "lesche",
+account "<agent name>"). If the Keychain backend is unavailable (non-macOS,
+or the 'security' CLI is missing) lesche falls back to the file backend
+silently. Unset or any other value selects the file backend.
+
 ## Common mistakes
 
 - Using "tell" when the human asked you to "ask" — you'll return
