@@ -1,4 +1,18 @@
-# Lesche — Workstreams
+# Lesche — Coordinator Notes
+
+If you're reading this, a human or the coordinator agent just handed
+you a workstream. You are about to write code in a repo you may not
+have seen before, alongside other agents doing the same. This file
+is the single source of truth for:
+
+1. What state the codebase is in.
+2. Who owns what right now.
+3. The rules of engagement so you don't step on another agent's work.
+4. A **cold-start reading list every agent on the current batch must
+   read before writing a single line of code** (see the dedicated
+   section below).
+
+## What this file is for
 
 A plan for running multiple coding agents in parallel on lesche without
 stepping on each other. Each workstream is designed as a single atomic
@@ -9,6 +23,64 @@ We do **not** split "agent A writes code, agent B writes tests." That
 split couples two agents through a review loop on every change and
 defeats the point of parallelism. One agent owns a workstream
 end-to-end.
+
+## Cold-start reading list (ALL agents, every batch)
+
+Every agent in the current batch starts cold — nobody has repo
+context from a previous session. Read these files in order before
+writing a line of code. Your workstream section below adds extra
+files on top of this.
+
+1. **`COORDINATOR.md`** (this file) — top to bottom. Especially
+   "Current assignments", "Parallelization principles", "File-
+   ownership heat map", "Rules of engagement", and the scope entry
+   for your specific workstream.
+2. **`ARCHITECTURE.md`** — how the pieces fit. Daemon/client/tunnel/
+   writer/registry model.
+3. **`IDEA.md`** — why lesche exists. Short.
+4. **`MVP.md`** — what is shipping and what isn't. Rooms and queue
+   are now merged; some of this doc is retrospective.
+5. **`protocol.go`** — wire-level request/response shapes. **Do
+   not edit struct shapes** — workstream F (structured errors) owns
+   that refactor and is sequenced last. Additive fields only.
+6. **`help.go`** and run `./lesche protocol` — the agent-facing
+   protocol guide. If your workstream adds a user-visible command,
+   you update both.
+7. **`state.go`** — the dispatch switch is the entry point for
+   every op. You will almost certainly add a case here.
+8. Your **workstream-specific files** — listed in the "Per-
+   workstream reading list" section further down.
+
+After reading: identify **which files your workstream is going to
+touch**, cross-check them against the heat map, and if you see
+collisions announce them in a lesche tunnel to `claude-coordinator`
+before writing.
+
+## How to coordinate
+
+All agents coordinate through lesche itself. The daemon is already
+running at `~/.lesche/sock`. Sequence at session start:
+
+```
+export LESCHE_NAME=<your-agent-name>    # e.g. copilot, codex, claude-code
+./lesche register                        # idempotent; mints/reuses your key
+./lesche agents                          # see who else is registered
+./lesche tunnel claude-coordinator       # announce start-of-work
+```
+
+Announce at these moments:
+- Starting a workstream (so the coordinator knows you're live).
+- Hitting an open question in your scope entry (don't guess; ask).
+- Needing to touch a file outside your heat-map column (collision
+  check before writing).
+- "Ready for review" — include branch name, commit SHA, `make test`
+  summary, any bugs found-but-not-fixed, any new env vars or
+  commands added.
+
+Leases are 10 minutes; any command renews. If you go idle longer
+than that your tunnels close with `peer lease expired`. Run
+`./lesche renew` if you are about to sit idle, or just run any
+command periodically.
 
 ## Current state (snapshot at commit e4e7186)
 
@@ -42,9 +114,13 @@ again; collisions are small (see heat map further down).
 
 | Agent | Branch | Workstream | Worktree path | Status |
 |-------|--------|------------|---------------|--------|
-| `copilot` | `feat/identity` | A. Identity refactor + nicknames | `~/Obolos/lesche-identity` | Assigned. Branch head at `a907186`; rebase on main before starting. |
-| `claude-code` | `feat/resumable` | D. Resumable blocking | `~/Obolos/lesche-resumable` | Assigned. Worktree + branch to create. No prior context in current session — read list below before touching code. |
-| `codex` | `feat/keychain` | E. Keychain integration | `~/Obolos/lesche-keychain` | Assigned. Worktree + branch to create. Self-contained; no protocol change. |
+| `copilot` | `feat/identity` | A. Identity refactor + nicknames | `~/Obolos/lesche-identity` | Assigned. Worktree exists at head `a907186`; rebase on main before starting. |
+| `claude-code` | `feat/resumable` | D. Resumable blocking | `~/Obolos/lesche-resumable` | Assigned. Create worktree + branch from current main. |
+| `codex` | `feat/keychain` | E. Keychain integration | `~/Obolos/lesche-keychain` | Assigned. Create worktree + branch from current main. Self-contained; no protocol change. |
+
+All three agents start cold this batch. Read the "Cold-start reading
+list" section above plus your workstream's extras from "Per-workstream
+reading list" below before writing any code.
 
 Merge gate unchanged: `make test` passing + human approval over a
 lesche tunnel to `claude-coordinator`.
@@ -57,29 +133,61 @@ the first-batch merge window. Raise `leaseTTL` in `state.go` to 30 or
 in `state.go`; whichever workstream merges first picks this up to
 avoid a standalone patch.
 
-### Cold-start reading list for `claude-code` (feat/resumable)
+### Per-workstream reading list
 
-Claude Code starts this batch with no context. Read in this order
-before writing a line:
+Read this after the cold-start list above, before writing code.
 
-1. `ARCHITECTURE.md` — top-to-bottom.
-2. `IDEA.md` and `MVP.md` — what lesche is and the tunnel spec.
-3. `protocol.go` — wire-level request/response shapes. **Do not
-   edit struct shapes**; F (structured errors) owns that refactor.
-4. `tunnel.go` — the turn FSM, mailbox, send/await semantics. This
+**A. Identity refactor + nicknames (`copilot`, `feat/identity`)**
+
+1. `IDENTITY.md` — the spec you're implementing. Read this first;
+   everything else is just how to land it in the current code.
+2. `registry.go` — persistence of the agent table. You will rework
+   the keying from name to ULID, preserving pubkeys during migration.
+3. `signing.go` — how pubkeys are generated and stored. Keys are
+   keyed by name today; identity needs a path from name → agent_id
+   without losing a registered agent's key.
+4. `client.go` — every command that resolves a peer by name. You
+   will add a resolver (bare-name / `name@project` / `name@project:branch`
+   / ULID / nickname) that wraps this.
+5. `daemon_integration_test.go` — the registration + signed-request
+   flow you must not break during migration.
+6. Open question before you start: **nickname storage location**.
+   `IDENTITY.md` proposes `~/.lesche/nicknames.json` outside the
+   workspace; alternative is in the git-backed workspace for audit.
+   Raise this in your kickoff tunnel to `claude-coordinator`.
+
+**D. Resumable blocking (`claude-code`, `feat/resumable`)**
+
+1. `tunnel.go` — the turn FSM, mailbox, send/await semantics. This
    is the file you will spend the most time in.
-5. `state.go` — dispatch switch (you'll add a `resume` case) and
-   the any-waiter mechanism. Note how `opAwait` currently behaves
-   on timeout (it drops the waiter).
-6. `client.go` — how existing commands are wired client-side
-   (`lesche send`, `lesche await`); add `lesche resume` in the same
+2. `state.go` — dispatch switch (you will add a `resume` case) and
+   the any-waiter mechanism. Study how `opAwait` currently behaves
+   on timeout — it drops the waiter. Your job is to keep the tunnel
+   state intact so a client can re-block.
+3. `client.go` — how existing commands are wired client-side
+   (`lesche send`, `lesche await`). Add `lesche resume` in the same
    style.
-7. `main.go` and `help.go` — short; pattern-match the additions.
-8. `daemon_integration_test.go` and `tunnel_test.go` — the style you
-   must match for your tests.
+4. `main.go` and `help.go` — short; pattern-match the additions.
+5. `tunnel_test.go` and `daemon_integration_test.go` — the test
+   style you must match. Timeout-then-resume is the core new test.
 
-Then look at the catalog entry **D. Resumable blocking** further down
-for scope, file list, and test requirements.
+**E. Keychain integration (`codex`, `feat/keychain`)**
+
+1. `signing.go` — current implementation: keys live as files at
+   `~/.lesche/keys/<name>.key`. You will extract a keystore
+   interface with two backends: file (default) and keychain
+   (macOS Security framework via cgo, or `99designs/keyring` or
+   similar — pick a pure-Go library if you can find one that
+   covers macOS Keychain).
+2. `help.go` — document `LESCHE_KEYSTORE=keychain` env switch.
+3. `signing_test.go` — existing coverage pattern for the file
+   backend. Mirror it for keychain, skipping on CI/Linux if the
+   backend is unavailable. Verify fallback-to-file when keychain
+   init fails.
+
+Everyone: before writing, run `./lesche protocol` to see the
+agent-facing guide verbatim, and `make test` to confirm the baseline
+suite (22 tests, ~5.5s) is green on your branch.
 
 Rules repeated for clarity: each agent owns its branch end-to-end (code +
 tests + docs + help updates). Merge gate is `make test` passing plus human
