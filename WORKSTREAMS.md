@@ -10,7 +10,7 @@ split couples two agents through a review loop on every change and
 defeats the point of parallelism. One agent owns a workstream
 end-to-end.
 
-## Current state (snapshot at commit b3f591b)
+## Current state (snapshot at commit 2cabb6a)
 
 **Shipped on main:**
 - Tunnel transport (2-party sync, turn FSM, git-backed transcript).
@@ -20,10 +20,12 @@ end-to-end.
 - Install pipeline: `make install` places binary on `$PATH`.
 - Protocol help (`lesche protocol`) and short help (`lesche help`)
   current for everything shipped.
+- Test suite: `state_test.go`, `tunnel_test.go`, `signing_test.go`,
+  `daemon_integration_test.go`. 13 tests via `make test`, 5.4s runtime.
 
 **Active branches (not on main):**
-- `feat/tests` — codex owns. Unit + integration test suite being
-  rebased onto main to cover signing behavior.
+- None right now. `feat/tests` merged at `2cabb6a`. Ready to start the
+  parallel batch below.
 
 **Designed, not implemented:**
 - `IDENTITY.md` — rich identity + nickname model.
@@ -31,6 +33,44 @@ end-to-end.
 - SQLite write queue, resumable blocking, structured error payloads,
   keychain integration, multi-project workspace isolation,
   cross-machine sync.
+
+## Current assignments (picked up after restart)
+
+We are about to start a 3-agent parallel batch. This is the authoritative
+list so any restarting session can recover context.
+
+| Agent | Branch | Workstream | Worktree path | Status |
+|-------|--------|------------|---------------|--------|
+| Claude Code (me) | `feat/identity` | A. Identity refactor + nicknames | `~/Obolos/lesche-identity` | Not started |
+| GPT-5 via Codex | `feat/rooms` | B. Room mode (N-party) | `~/Obolos/lesche-rooms` | Not started. Rebase from `main@2cabb6a` on start. |
+| Copilot (to be booted) | `feat/write-queue` | C. SQLite write queue | `~/Obolos/lesche-write-queue` | Blocked on three open questions below. |
+
+Rules repeated for clarity: each agent owns its branch end-to-end (code +
+tests + docs + help updates). Merge gate is `make test` passing plus human
+approval over a lesche tunnel to `claude`.
+
+### Open questions blocking Copilot start
+
+1. **Copilot git identity on commits.** Own identity (matches Codex
+   pattern: `user.email=copilot@local`, `user.name=<whatever copilot
+   identifies as>`) or attributed to the human?
+2. **SQLite dependency.** Add `modernc.org/sqlite` (pure Go, preserves
+   static-binary story) or hand-roll an append-only WAL file?
+3. **Nickname storage location** if identity workstream ships first.
+   `IDENTITY.md` proposes `~/.lesche/nicknames.json` (outside workspace).
+   Alternative: in the workspace for git audit. Pick now so identity
+   workstream knows where to write.
+
+### UX issue flagged, not in a workstream yet
+
+4. **Default lease TTL is too short.** 10 minutes. Agents doing
+   independent implementation work between lesche calls get dropped
+   silently; open tunnels close with `peer lease expired` on the peer
+   side. Observed during the doc-writing push before this restart.
+   Easiest fix: raise TTL to 30 or 60 minutes. Slightly better fix:
+   also renew lease on `agents` and other from-less listings. Scope:
+   tiny; can land as a spot patch to main outside the parallel batch,
+   or bundled into whichever workstream merges first.
 
 ## Parallelization principles
 
@@ -242,18 +282,10 @@ any other workstream that edits handlers.
 **Agent fit**: Deep context. Touches the edit surface of everything.
 Schedule after the next parallel batch lands.
 
-## Suggested parallel batch (3-agent)
+## Sequencing after the current batch
 
-For three agents running concurrently right now:
-
-| Agent | Branch | Workstream | Why |
-|-------|--------|------------|-----|
-| Claude Code (me) | `feat/identity` | A. Identity refactor | Deepest lesche context; most architectural judgment needed. |
-| Codex | finish `feat/tests` → merge → `feat/rooms` | B. Room mode | Finishes current tests work first. Rooms builds on tunnel patterns Codex already tested. Will rebase addressing post-identity merge. |
-| Copilot (new) | `feat/write-queue` | C. SQLite write queue | Fully self-contained, no lesche history required, reads like a textbook "drain queue to storage" problem. Best introduction. |
-
-Resumable blocking (D) and keychain (E) can be slotted in once the
-above land. Structured errors (F) waits until everything else is in.
+Resumable blocking (D) and keychain (E) can be slotted in once A, B, C
+land. Structured errors (F) waits until everything else is in.
 
 ## Rules of engagement
 
@@ -288,14 +320,8 @@ above land. Structured errors (F) waits until everything else is in.
 - **Touching `/opt/homebrew/bin/lesche`** from a feature branch. The
   production binary is rebuilt from main only.
 
-## Unknowns the human still needs to answer
+## Pointer
 
-- Do we want Copilot's commits signed under its own git identity, or
-  attributed to the human? (Suggest: own identity, to match the Codex
-  pattern.)
-- Are we comfortable adding one pure-Go dependency (`modernc.org/sqlite`)
-  for the write queue, or would a homegrown append-only WAL file be
-  preferred?
-- For nickname storage (if identity workstream lands first): go into
-  the workspace or stay at `~/.lesche/nicknames.json`? `IDENTITY.md`
-  proposed outside-the-workspace; user-callable.
+Open questions blocking work are listed at the top of this file under
+"Current assignments". Once answered, they land here as settled design
+notes.
