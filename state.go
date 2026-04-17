@@ -76,6 +76,12 @@ func newState() (*State, error) {
 	if err := s.loadPlans(); err != nil {
 		return nil, err
 	}
+	if err := s.loadRooms(); err != nil {
+		return nil, err
+	}
+	if err := s.replayMailbox(); err != nil {
+		return nil, err
+	}
 	return s, nil
 }
 
@@ -203,6 +209,76 @@ func (s *State) requestStop() {
 }
 
 func (s *State) waitWriterDone() { s.wg.Wait() }
+
+// replayMailbox replays unread mailbox rows from the SQLite mailbox table
+// into the in-memory channel and room mailboxes. Called synchronously in
+// newState() before the daemon starts accepting connections, so no locking
+// contest is possible.
+func (s *State) replayMailbox() error {
+	rows, err := s.queue.mailboxRows()
+	if err != nil {
+		return fmt.Errorf("replay mailbox rows: %w", err)
+	}
+	for _, row := range rows {
+		ts, err := time.Parse(time.RFC3339, row.ts)
+		if err != nil {
+			ts = time.Now()
+		}
+		switch row.kind {
+		case "peer":
+			ch := s.getOrCreateChannel(row.recipient, row.target)
+			ch.mu.Lock()
+			ch.mailbox[row.recipient] = append(ch.mailbox[row.recipient], Message{
+				Seq:  row.seq,
+				From: row.fromName,
+				TS:   ts,
+				Body: row.body,
+			})
+			if row.seq > ch.seq {
+				ch.seq = row.seq
+			}
+			ch.mu.Unlock()
+		case "room":
+			s.mu.Lock()
+			r, ok := s.rooms[row.target]
+			s.mu.Unlock()
+			if !ok {
+				continue
+			}
+			r.mu.Lock()
+			r.mailbox[row.recipient] = append(r.mailbox[row.recipient], RoomMessage{
+				Seq:  row.seq,
+				Room: row.target,
+				From: row.fromName,
+				TS:   ts,
+				Body: row.body,
+			})
+			if row.seq > r.seq {
+				r.seq = row.seq
+			}
+			r.mu.Unlock()
+		}
+	}
+
+	droppedRows, err := s.queue.mailboxDropped()
+	if err != nil {
+		return fmt.Errorf("replay dropped counters: %w", err)
+	}
+	for _, row := range droppedRows {
+		if row.kind == "room" {
+			s.mu.Lock()
+			r, ok := s.rooms[row.target]
+			s.mu.Unlock()
+			if !ok {
+				continue
+			}
+			r.mu.Lock()
+			r.dropped[row.recipient] = row.dropped
+			r.mu.Unlock()
+		}
+	}
+	return nil
+}
 
 func (s *State) dispatch(req Request) Response {
 	// register is unauthenticated by design — first-to-claim binds the pubkey
@@ -528,7 +604,7 @@ func (s *State) opRead(req Request) Response {
 		}
 		s.mu.Unlock()
 		ch := s.getOrCreateChannel(from, peerName)
-		return ch.read(from, time.Duration(timeout)*time.Second)
+		return ch.read(s, from, time.Duration(timeout)*time.Second)
 	}
 	return s.roomRead(from, room, time.Duration(timeout)*time.Second)
 }
@@ -589,6 +665,9 @@ func (s *State) opReadAny(req Request) Response {
 			msg := q[0]
 			c.mailbox[from] = q[1:]
 			peer := other(c, from)
+			if s.queue != nil {
+				_ = s.queue.mailboxDeleteOne(from, "peer", peer, msg.Seq)
+			}
 			c.mu.Unlock()
 			s.mu.Unlock()
 			return anyResponse("peer", peer, msg)
@@ -605,6 +684,9 @@ func (s *State) opReadAny(req Request) Response {
 			msg := q[0]
 			r.mailbox[from] = q[1:]
 			roomName := r.Name
+			if s.queue != nil {
+				_ = s.queue.mailboxDeleteOne(from, "room", roomName, msg.Seq)
+			}
 			r.mu.Unlock()
 			s.mu.Unlock()
 			return anyResponse("room", roomName, toPeerMsg(msg))
