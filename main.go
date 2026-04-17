@@ -24,6 +24,22 @@ func main() {
 		cmdRegister(os.Args[2:])
 	case "agents":
 		cmdAgents(os.Args[2:])
+	case "rooms":
+		cmdRooms(os.Args[2:])
+	case "room":
+		cmdRoom(os.Args[2:])
+	case "join":
+		cmdJoin(os.Args[2:])
+	case "leave":
+		cmdLeave(os.Args[2:])
+	case "participants":
+		cmdParticipants(os.Args[2:])
+	case "post":
+		cmdPost(os.Args[2:])
+	case "inbox":
+		cmdInbox(os.Args[2:])
+	case "peek":
+		cmdPeek(os.Args[2:])
 	case "tunnel":
 		cmdTunnel(os.Args[2:])
 	case "send":
@@ -59,6 +75,14 @@ func usage() {
 Usage:
   lesche register [--name <name>]
   lesche agents
+  lesche rooms
+  lesche room create <name> [--desc <text>]
+  lesche join <room>
+  lesche leave <room>
+  lesche participants <room>
+  lesche post <room> "<message>"
+  lesche inbox [<room>]
+  lesche peek <room>
   lesche sessions            list open tunnels for caller
   lesche history <sid> [--limit N] [--since SEQ]   read transcript of a tunnel you are in
   lesche tunnel <peer>

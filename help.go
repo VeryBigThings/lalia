@@ -35,10 +35,28 @@ Your registration has a lease (default 10 minutes). Every command you run
 renews it. If you go idle for longer than the lease, you get dropped and your
 open tunnels close. To extend without doing anything else: "lesche renew".
 
-## Two transports (MVP ships with Tunnel only)
+## Two transports
 
 Tunnel: synchronous two-party channel. One speaker at a time. Like TCP.
 Your send blocks until the peer replies. Your await blocks until the peer sends.
+
+Room: asynchronous N-party pub/sub. You create/join/leave rooms, post
+messages, and read with inbox/peek. Room max is 8 members.
+
+## Room commands
+
+    lesche rooms
+    lesche room create <name> [--desc <text>]
+    lesche join <room>
+    lesche leave <room>
+    lesche participants <room>
+    lesche post <room> "message"
+    lesche inbox [<room>]
+    lesche peek <room>
+
+Mailbox behavior: each subscriber has a bounded queue (64 messages). A slow
+subscriber does not block senders. If overflow happens, oldest messages are
+dropped and inbox returns a notice on the next read.
 
 ## Opening a tunnel
 
