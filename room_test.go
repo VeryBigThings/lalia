@@ -138,7 +138,7 @@ func TestRoomPostBroadcastAndReadAccess(t *testing.T) {
 	if nonMemberPeek.OK || nonMemberPeek.Code != CodeNotFound {
 		t.Fatalf("non-member peek should be not_found: %+v", nonMemberPeek)
 	}
-	nonMemberInbox := s.opInbox(Request{Args: map[string]any{"from": "dave", "room": "ops"}})
+	nonMemberInbox := s.opRead(Request{Args: map[string]any{"from": "dave", "room": "ops", "timeout": float64(0)}})
 	if nonMemberInbox.OK || nonMemberInbox.Code != CodeNotFound {
 		t.Fatalf("non-member inbox should be not_found: %+v", nonMemberInbox)
 	}
@@ -186,7 +186,7 @@ func TestRoomMailboxOverflowNoticeAndNoSenderBlocking(t *testing.T) {
 		t.Fatalf("oldest retained body=%q, want m07", body)
 	}
 
-	inbox := s.opInbox(Request{Args: map[string]any{"from": "bob", "room": "alerts"}})
+	inbox := s.opRead(Request{Args: map[string]any{"from": "bob", "room": "alerts", "timeout": float64(0)}})
 	inboxMsgs := roomMessages(t, inbox)
 	if len(inboxMsgs) != roomMailboxLimit+1 {
 		t.Fatalf("inbox count=%d, want %d (notice + queue)", len(inboxMsgs), roomMailboxLimit+1)
@@ -202,7 +202,7 @@ func TestRoomMailboxOverflowNoticeAndNoSenderBlocking(t *testing.T) {
 		t.Fatalf("first delivered message body=%q, want m07", body)
 	}
 
-	nextInbox := s.opInbox(Request{Args: map[string]any{"from": "bob", "room": "alerts"}})
+	nextInbox := s.opRead(Request{Args: map[string]any{"from": "bob", "room": "alerts", "timeout": float64(0)}})
 	nextMsgs := roomMessages(t, nextInbox)
 	if len(nextMsgs) != 0 {
 		t.Fatalf("next inbox should be empty after drain, got %d entries", len(nextMsgs))
@@ -233,11 +233,11 @@ func TestRoomPeekDoesNotConsumeInboxDoes(t *testing.T) {
 		t.Fatalf("second peek should still see m1, got %v", peek2)
 	}
 
-	inbox := roomMessages(t, s.opInbox(Request{Args: map[string]any{"from": "bob", "room": "ops"}}))
+	inbox := roomMessages(t, s.opRead(Request{Args: map[string]any{"from": "bob", "room": "ops", "timeout": float64(0)}}))
 	if len(inbox) != 1 || inbox[0]["body"] != "m1" {
 		t.Fatalf("inbox=%v, want single m1", inbox)
 	}
-	inbox2 := roomMessages(t, s.opInbox(Request{Args: map[string]any{"from": "bob", "room": "ops"}}))
+	inbox2 := roomMessages(t, s.opRead(Request{Args: map[string]any{"from": "bob", "room": "ops", "timeout": float64(0)}}))
 	if len(inbox2) != 0 {
 		t.Fatalf("second inbox should be empty, got %v", inbox2)
 	}
@@ -286,7 +286,7 @@ func TestRoomPerSenderFIFOWithInterleavedPosts(t *testing.T) {
 		}
 	}
 
-	msgs := roomMessages(t, s.opInbox(Request{Args: map[string]any{"from": "bob", "room": "triage"}}))
+	msgs := roomMessages(t, s.opRead(Request{Args: map[string]any{"from": "bob", "room": "triage", "timeout": float64(0)}}))
 	if len(msgs) != 4 {
 		t.Fatalf("bob inbox len=%d, want 4", len(msgs))
 	}

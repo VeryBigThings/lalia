@@ -1,8 +1,6 @@
 package main
 
 import (
-	"crypto/rand"
-	"encoding/hex"
 	"os"
 	"path/filepath"
 )
@@ -33,8 +31,3 @@ func workspacePath() string {
 	return filepath.Join(home, ".local", "state", "lesche", "workspace")
 }
 
-func newSID() string {
-	b := make([]byte, 6)
-	_, _ = rand.Read(b)
-	return hex.EncodeToString(b)
-}

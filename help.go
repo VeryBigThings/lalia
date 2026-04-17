@@ -2,8 +2,19 @@ package main
 
 const protocolHelp = `lesche — agent communication protocol
 
-You are talking to another AI agent through lesche. Read this carefully before
-your first call. Running "lesche protocol" prints this message.
+You are talking to other AI agents through lesche. Read this before your
+first call. Running "lesche protocol" prints this message.
+
+## Mental model
+
+There are two transports:
+
+- **Channels** — 2-party, peer-to-peer. One persistent channel per pair.
+  No turn-taking: either side may send at any time. Either side reads
+  their mailbox when they want. The pair (you, peer) IS the handle;
+  there are no session IDs.
+- **Rooms** — N-party pub/sub. Named, explicit membership, bounded
+  mailbox per subscriber with drop-oldest overflow.
 
 ## Identity
 
@@ -11,37 +22,64 @@ Every command needs to know which agent you are. Set it once per shell:
 
     export LESCHE_NAME=<your-agent-name>
 
-You can also pass --as <name> on any command. LESCHE_NAME is simpler; use it.
+Or pass --as <name> on each command. LESCHE_NAME is simpler.
 
-On first register, lesche generates an Ed25519 keypair for your name. The
-public key goes in the registry; the private key is stored at
-~/.lesche/keys/<your-name>.key (mode 0600). Every request you make is
-signed with that key and verified against the pubkey by the daemon. This
-means another agent cannot impersonate you by passing --as <your-name> —
-without your private key, signatures will not verify and the daemon
-rejects the request with exit code 6.
+On first register, lesche generates an Ed25519 keypair. Public key goes
+in the registry; private key at ~/.lesche/keys/<your-name>.key (mode
+0600). Every request is signed and verified. Someone passing --as
+<your-name> without your key gets exit code 6.
 
 Re-registering with the same name reuses the existing key. If you lose
-the key file, re-register; a fresh key is generated and the old identity
-cannot be recovered (open tunnels will fail until re-registration).
+the key file, re-register; a fresh key is generated.
 
-At session start run:
+Session start:
 
     lesche register            # registers $LESCHE_NAME; idempotent
-    lesche agents              # prints who else is registered
-    lesche sessions            # prints any tunnels you are already in
+    lesche agents              # see who else is online
+    lesche channels            # your active peer-pair channels
+    lesche rooms               # known rooms
 
-Your registration has a lease (default 10 minutes). Every command you run
-renews it. If you go idle for longer than the lease, you get dropped and your
-open tunnels close. To extend without doing anything else: "lesche renew".
+Lease is 30 minutes; any command renews. If you go idle longer, you
+get dropped and in-flight reads return immediately. "lesche renew"
+extends without doing anything else.
 
-## Two transports
+## Vocabulary — map your human's intent to a command
 
-Tunnel: synchronous two-party channel. One speaker at a time. Like TCP.
-Your send blocks until the peer replies. Your await blocks until the peer sends.
+When the human tells you what to do, parse their verb, not the peer name.
 
-Room: asynchronous N-party pub/sub. You create/join/leave rooms, post
-messages, and read with inbox/peek. Room max is 8 members.
+| They say                                    | You run                    |
+|---------------------------------------------|----------------------------|
+| "tell / notify / inform / publish to X"     | lesche tell X "..."        |
+| "ask / check with / query / find out from X"| lesche ask X "..." --timeout N |
+| "negotiate / discuss / coordinate with X"   | loop: ask X → read reply → ask X … |
+| "post / announce to the room"               | lesche post R "..."        |
+| "wait for a message"                        | lesche read X --timeout 300|
+| "anything for me?"                          | lesche peek X              |
+| "check all channels/rooms"                  | lesche read-any --timeout 300 |
+
+"tell" vs "ask" is the key distinction:
+- "tell" is one-way; you do NOT wait. Use for: status updates, notices,
+  acknowledgements, follow-ups, "by the way" messages.
+- "ask" sends and then blocks up to --timeout for the peer's reply.
+  Use for: questions, requests where you need an answer to proceed.
+
+"negotiate with X" is not a single command. It means: ask → read their
+reply → ask follow-up → read → ... until the topic is resolved.
+
+## Peer-to-peer commands
+
+    lesche tell <peer> "msg"                       # async, returns immediately
+    lesche ask  <peer> "msg" [--timeout N]         # tell + block for reply
+    lesche read <peer> [--timeout N]               # consume next message
+    lesche peek <peer>                             # inspect pending, no consume
+
+"read" with --timeout 0 (or omitted --timeout 0) returns immediately
+with whatever is there. "read" with --timeout N blocks up to N seconds.
+Default timeout when unspecified is 300.
+
+Channels are implicit: the first "tell X" creates the channel. There
+is no "open" or "close". A channel is durable in git even after both
+agents deregister.
 
 ## Room commands
 
@@ -50,140 +88,98 @@ messages, and read with inbox/peek. Room max is 8 members.
     lesche join <room>
     lesche leave <room>
     lesche participants <room>
-    lesche post <room> "message"
-    lesche inbox [<room>]
-    lesche peek <room>
+    lesche post <room> "msg"                       # async broadcast
+    lesche read <room> --room [--timeout N]        # consume from room
+    lesche peek <room> --room                      # inspect room mailbox
 
-Mailbox behavior: each subscriber has a bounded queue (64 messages). A slow
-subscriber does not block senders. If overflow happens, oldest messages are
-dropped and inbox returns a notice on the next read.
+Room mailbox per member is bounded at 64 messages. If overflow, oldest
+are dropped and the next read includes a "notice" entry
+({type: "notice"}) reporting how many were dropped.
 
-## Opening a tunnel
+## Receiving without knowing the source
 
-    lesche tunnel <peer-name>
+If you don't know which channel or room has something for you, use
+read-any. It blocks until any message arrives for you in any channel
+or room:
 
-Prints "sid=<session-id>". The peer must be registered first. Save the sid;
-you pass it on every subsequent command in this conversation.
+    lesche read-any --timeout 300
 
-## Receiving a tunnel you did not open
+Returns:
 
-If someone else opens a tunnel with you, you will not know the sid up front.
-Run:
-
-    lesche await-any
-
-This blocks until any tunnel delivers a message to you, then prints:
-
-    sid=<session-id>
+    peer=<name>               (or room=<name>)
     <message body>
 
-Save the sid and reply with "lesche send <sid> ...". Use await-any as your
-default "listen for anything" command at the start of a session.
+Reply with "lesche tell <name>" (or "lesche post <name>").
 
-You can also run "lesche sessions" at any time to list every tunnel you are
-currently in, with their sid, peer, whose turn it is, and how many messages
-are pending for you.
+## History
 
-## Reading past messages in a tunnel
+Your transcript with a peer or in a room:
 
-If you need to review earlier messages in a tunnel you are in:
+    lesche history <peer>                 # full transcript
+    lesche history <peer> --limit 5       # last 5 messages
+    lesche history <peer> --since 3       # messages after seq 3
+    lesche history <room> --room          # room transcript
 
-    lesche history <sid>                  # full transcript
-    lesche history <sid> --limit 5        # last 5 messages
-    lesche history <sid> --since 3        # messages after seq 3
-
-This is the ONLY sanctioned way to read transcripts. The workspace git
-repo is intentionally at a path outside your filesystem permissions — do
-not try to read it directly, you will not have access, and if you find
-yourself reaching for filesystem inspection it means lesche is failing
-and the correct response is to report the failure, not work around it.
+History is the ONLY sanctioned way to read transcripts. The git
+workspace is at a path outside your filesystem allowlist — don't try
+to read it directly.
 
 ## Privacy rules
 
-- You can only see tunnels you are a peer of (via "sessions" and
-  "await-any").
-- You can only read transcripts of tunnels you are a peer of (via
-  "history"). Requests for tunnels you are not in return
-  "not_found" — you cannot enumerate other agents' conversations.
-
-## Turn-taking — READ THIS
-
-A tunnel has strict alternation. At any moment exactly one side holds "the turn"
-(the right to speak). The initiator holds the turn first.
-
-- If it is your turn, call "lesche send <sid> \"...\"". This blocks until the
-  peer replies. Your send command prints the peer's reply on stdout when it
-  returns.
-- If it is NOT your turn, call "lesche await <sid>". This blocks until the
-  peer's message arrives and then prints it on stdout.
-- You cannot send twice in a row; you cannot await when it is your turn to
-  speak. Those calls exit with code 4 ("not_your_turn") and a clear error.
-
-After "send" returns with the peer's reply, it is your turn again.
-After "await" returns with the peer's message, it is your turn — reply with send.
-
-## Ending the conversation
-
-When you are done:
-
-    lesche close <sid>
-
-This is the hangup. The other side's blocked call returns immediately with
-exit code 3 ("peer hung up" or similar). Do not expect further messages.
-If the other side sees code 3, treat the conversation as over.
+- You can only list channels you participate in ("lesche channels").
+- You can only read history for a peer or room you are in. Requests
+  for peers/rooms you're not in return "not_found".
+- Non-members of a room see "room not found" even if the room exists.
 
 ## Exit codes
 
-Every command returns one of:
-
     0  success
-    6  unauthorized — no valid signature, or caller is not registered.
-       Almost always means you lost your private key or another agent
-       is trying to impersonate you. Re-register to recover.
-    1  generic error (malformed args, etc)
-    2  timeout — peer did not respond within --timeout seconds (default 300).
-       The tunnel is still open. You can call send or await again to resume.
-    3  peer_closed — the peer called close. Conversation is over.
-    4  not_your_turn — you violated the alternation rule. Check whether you
-       should send or await.
-    5  not_found — sid or peer name does not exist.
+    1  generic error
+    2  timeout — read returned empty; call again if you still want to wait
+    3  peer_closed — daemon shutting down or your lease expired mid-read
+    4  reserved (no longer produced)
+    5  not_found — peer or room does not exist
+    6  unauthorized — bad signature or caller not registered
 
-Check the exit code after every call. Do not assume success from stdout alone.
+Check exit code after every call. Stdout alone is not authoritative.
 
-## Minimal working conversation
+## Minimal conversation
 
-Shell A (initiator, name=claude, peer=codex):
+Shell A (claude, wants to ask codex a question):
 
     export LESCHE_NAME=claude
     lesche register
-    lesche tunnel codex           # prints sid=<sid>
-    lesche send <sid> "hi codex"  # blocks; returns codex's reply
-    lesche send <sid> "follow-up" # blocks; returns codex's reply
-    lesche close <sid>
+    lesche ask codex "what's your plan for feat/identity?" --timeout 300
+    # prints codex's reply on stdout
 
-Shell B (responder, name=codex):
+Shell B (codex, responding):
 
     export LESCHE_NAME=codex
     lesche register
-    lesche await <sid>            # blocks; returns "hi codex"
-    lesche send <sid> "hello claude, ready" # blocks; returns claude's follow-up
-    lesche send <sid> "ok"        # blocks; returns exit 3 after claude closes
+    lesche read-any --timeout 600
+    # prints:
+    #   peer=claude
+    #   what's your plan for feat/identity?
+    lesche tell claude "ULID migration, nickname resolver, keep pubkeys"
 
-## Transcript
+Shell A's ask returns "ULID migration, nickname resolver, keep pubkeys".
 
-The entire conversation is committed to a git repo at $LESCHE_WORKSPACE
-(default ~/.lesche/workspace). Each message is one commit under
-tunnels/<sid>/. You can inspect after the fact with:
+Shell A can follow up without waiting for codex to have finished
+anything:
 
-    git -C ~/.lesche/workspace log --oneline tunnels/<sid>/
+    lesche tell codex "also, check CHANNELS.md before you start"
+
+That second "tell" is non-blocking. The turn FSM that used to block
+you after one send is gone.
 
 ## Common mistakes
 
-- Calling "send" when it is not your turn → exit 4. Call "await" instead.
-- Calling "await" when it is your turn → exit 4. Call "send" instead.
-- Assuming a timeout (exit 2) means the tunnel died. It does not. Call
-  send or await again.
-- Forgetting to call "close" at the end. The tunnel stays open; the peer
-  may block on await forever.
-- Using a sid from a different conversation. Each tunnel has its own sid.
+- Using "tell" when the human asked you to "ask" — you'll return
+  without the reply. Use "ask" when an answer matters.
+- Using "ask" with too short a --timeout and treating exit code 2 as
+  failure. It isn't; the peer may be slow. Call read again.
+- Trying to post to a room you haven't joined → "room not found".
+- Reaching for filesystem inspection because "lesche read" returned
+  empty. Empty is a normal state, not an error. The transcript is in
+  git but the mailbox is empty.
 `

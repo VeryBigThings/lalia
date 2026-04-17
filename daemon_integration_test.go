@@ -77,24 +77,15 @@ func mustRequest(t *testing.T, op string, args map[string]any) *Response {
 	return resp
 }
 
-func sidFrom(resp *Response) string {
-	if resp == nil || resp.Data == nil {
-		return ""
-	}
-	m, _ := resp.Data.(map[string]any)
-	if m == nil {
-		return ""
-	}
-	sid, _ := m["sid"].(string)
-	return sid
-}
-
 type requestResult struct {
 	resp *Response
 	err  error
 }
 
-func TestIntegrationRequestFlow(t *testing.T) {
+// TestIntegrationChannelFlow verifies the end-to-end peer-to-peer flow:
+// register, tell, read, consecutive tells without turn enforcement, and
+// read-any across channels.
+func TestIntegrationChannelFlow(t *testing.T) {
 	lescheHome := setupIntegrationEnv(t)
 	defer stopDaemonForHome(t, lescheHome)
 
@@ -107,125 +98,133 @@ func TestIntegrationRequestFlow(t *testing.T) {
 		t.Fatalf("register bob failed: %+v", rb)
 	}
 
-	renew := mustRequest(t, "renew", map[string]any{"from": "alice"})
-	if !renew.OK {
-		t.Fatalf("renew alice failed: %+v", renew)
-	}
-
-	agents := mustRequest(t, "agents", nil)
-	if !agents.OK {
-		t.Fatalf("agents failed: %+v", agents)
-	}
-	rows, ok := agents.Data.([]any)
-	if !ok || len(rows) < 2 {
-		t.Fatalf("agents rows=%T len=%d, want >=2", agents.Data, len(rows))
-	}
-
-	open := mustRequest(t, "tunnel", map[string]any{"from": "alice", "peer": "bob"})
-	if !open.OK {
-		t.Fatalf("open tunnel failed: %+v", open)
-	}
-	sid := sidFrom(open)
-	if sid == "" {
-		t.Fatalf("empty sid from tunnel response: %+v", open)
-	}
-
-	bobSendResult := make(chan requestResult, 1)
-	go func() {
-		first, err := request("await", map[string]any{"from": "bob", "sid": sid, "timeout": float64(3)})
-		if err != nil {
-			bobSendResult <- requestResult{err: err}
-			return
+	// alice tells bob three times in a row (previously illegal under turn FSM).
+	for _, body := range []string{"hi bob", "follow up", "one more"} {
+		resp := mustRequest(t, "tell", map[string]any{"from": "alice", "peer": "bob", "body": body})
+		if !resp.OK {
+			t.Fatalf("tell %s failed: %+v", body, resp)
 		}
-		if !first.OK {
-			bobSendResult <- requestResult{resp: first}
-			return
+	}
+
+	// bob reads them in order.
+	want := []string{"hi bob", "follow up", "one more"}
+	for i, expected := range want {
+		resp := mustRequest(t, "read", map[string]any{"from": "bob", "peer": "alice", "timeout": float64(1)})
+		if !resp.OK {
+			t.Fatalf("read %d failed: %+v", i, resp)
 		}
-		body, _ := first.Data.(map[string]any)["body"].(string)
-		if body != "hi bob" {
-			bobSendResult <- requestResult{resp: &Response{Error: "unexpected bob await body: " + body}}
-			return
+		body, _ := resp.Data.(map[string]any)["body"].(string)
+		if body != expected {
+			t.Fatalf("read %d body=%q, want %q", i, body, expected)
 		}
-		r, err := request("send", map[string]any{"from": "bob", "sid": sid, "body": "hi alice", "timeout": float64(1)})
-		bobSendResult <- requestResult{resp: r, err: err}
-	}()
-
-	aliceSend := mustRequest(t, "send", map[string]any{"from": "alice", "sid": sid, "body": "hi bob", "timeout": float64(3)})
-	if !aliceSend.OK {
-		t.Fatalf("alice send failed: %+v", aliceSend)
-	}
-	if body := aliceSend.Data.(map[string]any)["body"].(string); body != "hi alice" {
-		t.Fatalf("alice send returned body=%q, want hi alice", body)
 	}
 
-	bobSendRes := <-bobSendResult
-	if bobSendRes.err != nil {
-		t.Fatalf("bob send path error: %v", bobSendRes.err)
+	// bob reads again → empty (non-error).
+	empty := mustRequest(t, "read", map[string]any{"from": "bob", "peer": "alice", "timeout": float64(0)})
+	if !empty.OK {
+		t.Fatalf("empty read should be OK: %+v", empty)
 	}
-	bobSend := bobSendRes.resp
-	if bobSend.OK || bobSend.Code != CodeTimeout {
-		t.Fatalf("bob send should timeout waiting for follow-up: %+v", bobSend)
+	if m, _ := empty.Data.(map[string]any); m != nil {
+		if _, has := m["body"]; has {
+			t.Fatalf("empty read should not have body: %+v", m)
+		}
 	}
 
-	history := mustRequest(t, "history", map[string]any{"from": "alice", "sid": sid, "since": float64(0), "limit": float64(0)})
+	// history between alice and bob.
+	history := mustRequest(t, "history", map[string]any{"from": "alice", "peer": "bob"})
 	if !history.OK {
 		t.Fatalf("history failed: %+v", history)
 	}
 	msgs := history.Data.(map[string]any)["messages"].([]any)
-	if len(msgs) < 2 {
-		t.Fatalf("history messages=%d, want >=2", len(msgs))
+	if len(msgs) != 3 {
+		t.Fatalf("history msgs=%d, want 3", len(msgs))
 	}
 
-	mustRequest(t, "register", map[string]any{"name": "carol", "pid": float64(103)})
-	nonPeer := mustRequest(t, "history", map[string]any{"from": "carol", "sid": sid})
-	if nonPeer.OK || nonPeer.Code != CodeNotFound {
-		t.Fatalf("non-peer history should be not_found: %+v", nonPeer)
+	// channels listing for alice.
+	chans := mustRequest(t, "channels", map[string]any{"from": "alice"})
+	if !chans.OK {
+		t.Fatalf("channels failed: %+v", chans)
+	}
+	if rows, _ := chans.Data.([]any); len(rows) != 1 {
+		t.Fatalf("alice channels=%d, want 1", len(rows))
 	}
 
-	awaitAnyCh := make(chan requestResult, 1)
+	// read-any: kick off a blocking read-any for bob, tell him from alice,
+	// confirm bob's read-any returned with kind=peer target=alice.
+	resultCh := make(chan requestResult, 1)
 	go func() {
-		r, err := request("await-any", map[string]any{"from": "bob", "timeout": float64(3)})
-		awaitAnyCh <- requestResult{resp: r, err: err}
+		r, err := request("read-any", map[string]any{"from": "bob", "timeout": float64(3)})
+		resultCh <- requestResult{resp: r, err: err}
 	}()
 	time.Sleep(50 * time.Millisecond)
+	tellAgain := mustRequest(t, "tell", map[string]any{"from": "alice", "peer": "bob", "body": "for read-any"})
+	if !tellAgain.OK {
+		t.Fatalf("tell for read-any failed: %+v", tellAgain)
+	}
+	res := <-resultCh
+	if res.err != nil {
+		t.Fatalf("read-any err: %v", res.err)
+	}
+	if !res.resp.OK {
+		t.Fatalf("read-any failed: %+v", res.resp)
+	}
+	am := res.resp.Data.(map[string]any)
+	if kind, _ := am["kind"].(string); kind != "peer" {
+		t.Fatalf("read-any kind=%q, want peer", kind)
+	}
+	if tgt, _ := am["target"].(string); tgt != "alice" {
+		t.Fatalf("read-any target=%q, want alice", tgt)
+	}
+	if body, _ := am["body"].(string); body != "for read-any" {
+		t.Fatalf("read-any body=%q, want for read-any", body)
+	}
+}
 
-	sendForAny := mustRequest(t, "send", map[string]any{"from": "alice", "sid": sid, "body": "for await-any", "timeout": float64(1)})
-	if sendForAny.OK || sendForAny.Code != CodeTimeout {
-		t.Fatalf("alice send for await-any should timeout: %+v", sendForAny)
+// TestIntegrationRoomFlow verifies room post + read + read-any.
+func TestIntegrationRoomFlow(t *testing.T) {
+	lescheHome := setupIntegrationEnv(t)
+	defer stopDaemonForHome(t, lescheHome)
+
+	mustRequest(t, "register", map[string]any{"name": "alice", "pid": float64(201)})
+	mustRequest(t, "register", map[string]any{"name": "bob", "pid": float64(202)})
+
+	if !mustRequest(t, "room_create", map[string]any{"from": "alice", "name": "eng"}).OK {
+		t.Fatalf("room_create failed")
+	}
+	if !mustRequest(t, "join", map[string]any{"from": "bob", "room": "eng"}).OK {
+		t.Fatalf("bob join failed")
+	}
+	if !mustRequest(t, "post", map[string]any{"from": "alice", "room": "eng", "body": "ship friday"}).OK {
+		t.Fatalf("post failed")
 	}
 
-	anyRes := <-awaitAnyCh
-	if anyRes.err != nil {
-		t.Fatalf("await-any request error: %v", anyRes.err)
+	read := mustRequest(t, "read", map[string]any{"from": "bob", "room": "eng", "timeout": float64(0)})
+	if !read.OK {
+		t.Fatalf("read room failed: %+v", read)
 	}
-	anyResp := anyRes.resp
-	if !anyResp.OK {
-		t.Fatalf("await-any failed: %+v", anyResp)
+	msgs := read.Data.(map[string]any)["messages"].([]any)
+	if len(msgs) != 1 {
+		t.Fatalf("read msgs=%d, want 1", len(msgs))
 	}
-	anyData := anyResp.Data.(map[string]any)
-	if gotSID := anyData["sid"].(string); gotSID != sid {
-		t.Fatalf("await-any sid=%q, want %q", gotSID, sid)
-	}
-	if gotBody := anyData["body"].(string); gotBody != "for await-any" {
-		t.Fatalf("await-any body=%q, want for await-any", gotBody)
-	}
+}
 
-	sessions := mustRequest(t, "sessions", map[string]any{"from": "bob"})
-	if !sessions.OK {
-		t.Fatalf("sessions failed: %+v", sessions)
-	}
-	rows2 := sessions.Data.([]any)
-	if len(rows2) == 0 {
-		t.Fatalf("sessions for bob should include tunnel %s", sid)
-	}
+// TestIntegrationUnauthorizedCaller: an unregistered agent is rejected on
+// authenticated ops.
+func TestIntegrationUnauthorizedCaller(t *testing.T) {
+	lescheHome := setupIntegrationEnv(t)
+	defer stopDaemonForHome(t, lescheHome)
 
-	closed := mustRequest(t, "close", map[string]any{"from": "alice", "sid": sid})
-	if !closed.OK {
-		t.Fatalf("close failed: %+v", closed)
-	}
-
-	afterClose := mustRequest(t, "await", map[string]any{"from": "bob", "sid": sid, "timeout": float64(1)})
-	if afterClose.OK || afterClose.Code != CodePeerClosed {
-		t.Fatalf("await after close should be peer_closed: %+v", afterClose)
+	mustRequest(t, "register", map[string]any{"name": "alice", "pid": float64(301)})
+	// ghost is not registered and has no key file; the client refuses to
+	// sign. Either client-side key-load error or a server-side unauthorized
+	// response is acceptable — both prove unauthorized calls don't land.
+	resp, err := request("tell", map[string]any{"from": "ghost", "peer": "alice", "body": "hi"})
+	if err == nil {
+		if resp.OK {
+			t.Fatalf("ghost tell should have failed: %+v", resp)
+		}
+		if resp.Code != CodeUnauthorized {
+			t.Fatalf("expected unauthorized, got %+v", resp)
+		}
 	}
 }
