@@ -101,6 +101,9 @@ func (c *Channel) tell(s *State, from, body string) Response {
 		// delivered to cross-channel read-any
 	} else {
 		c.mailbox[peer] = append(c.mailbox[peer], msg)
+		if s.queue != nil {
+			_ = s.queue.mailboxAppend(peer, "peer", from, msg.Seq, from, msg.TS, msg.Body)
+		}
 	}
 	c.mu.Unlock()
 
@@ -110,7 +113,7 @@ func (c *Channel) tell(s *State, from, body string) Response {
 // read consumes and returns the oldest message in the caller's mailbox. If
 // the mailbox is empty and timeout > 0, blocks up to timeout for a new
 // message. timeout == 0 returns immediately with an empty result.
-func (c *Channel) read(from string, timeout time.Duration) Response {
+func (c *Channel) read(s *State, from string, timeout time.Duration) Response {
 	c.mu.Lock()
 	_, ok := c.peerOf(from)
 	if !ok {
@@ -122,6 +125,9 @@ func (c *Channel) read(from string, timeout time.Duration) Response {
 	if q, ok := c.mailbox[from]; ok && len(q) > 0 {
 		msg := q[0]
 		c.mailbox[from] = q[1:]
+		if s.queue != nil {
+			_ = s.queue.mailboxDeleteOne(from, "peer", other(c, from), msg.Seq)
+		}
 		c.mu.Unlock()
 		return msgResponse(&msg)
 	}

@@ -94,3 +94,39 @@ func (s *State) loadRegistry() error {
 	}
 	return nil
 }
+
+// loadRooms rehydrates the in-memory rooms map from the SQLite queue DB.
+// This is reliable even when git workspace writes haven't been committed yet.
+func (s *State) loadRooms() error {
+	if s.queue == nil {
+		return nil
+	}
+	records, err := s.queue.roomRows()
+	if err != nil {
+		return fmt.Errorf("load rooms: %w", err)
+	}
+	members, err := s.queue.roomMemberRows()
+	if err != nil {
+		return fmt.Errorf("load room members: %w", err)
+	}
+	for _, rec := range records {
+		createdAt, _ := time.Parse(time.RFC3339, rec.createdAt)
+		r := &Room{
+			Name:      rec.name,
+			Desc:      rec.desc,
+			CreatedBy: rec.createdBy,
+			CreatedAt: createdAt,
+			members:   make(map[string]bool),
+			mailbox:   make(map[string][]RoomMessage),
+			dropped:   make(map[string]int),
+			waiter:    make(map[string]chan RoomMessage),
+		}
+		for _, m := range members[rec.name] {
+			r.members[m] = true
+		}
+		s.mu.Lock()
+		s.rooms[rec.name] = r
+		s.mu.Unlock()
+	}
+	return nil
+}

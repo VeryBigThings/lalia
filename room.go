@@ -119,6 +119,10 @@ func (s *State) opRoomCreate(req Request) Response {
 	s.rooms[name] = r
 	s.mu.Unlock()
 
+	if s.queue != nil {
+		_ = s.queue.roomUpsert(name, desc, from, r.CreatedAt)
+		_ = s.queue.roomAddMember(name, from)
+	}
 	s.persistRoomDefinition(r)
 	s.persistRoomMembers(r)
 
@@ -155,6 +159,9 @@ func (s *State) opJoin(req Request) Response {
 	r.members[from] = true
 	r.mu.Unlock()
 
+	if s.queue != nil {
+		_ = s.queue.roomAddMember(room, from)
+	}
 	s.persistRoomMembers(r)
 	return Response{OK: true, Data: map[string]any{"room": room, "member": from}}
 }
@@ -184,6 +191,9 @@ func (s *State) opLeave(req Request) Response {
 	delete(r.waiter, from)
 	r.mu.Unlock()
 
+	if s.queue != nil {
+		_ = s.queue.roomRemoveMember(room, from)
+	}
 	s.persistRoomMembers(r)
 	return Response{OK: true, Data: map[string]any{"room": room, "member": from}}
 }
@@ -277,11 +287,18 @@ func (s *State) opPost(req Request) Response {
 		}
 		q := r.mailbox[member]
 		if len(q) >= roomMailboxLimit {
+			oldest := q[0]
 			q = q[1:]
 			r.dropped[member]++
+			if s.queue != nil {
+				_ = s.queue.mailboxDropOldest(member, "room", r.Name, oldest.Seq)
+			}
 		}
 		q = append(q, msg)
 		r.mailbox[member] = q
+		if s.queue != nil {
+			_ = s.queue.mailboxAppend(member, "room", r.Name, msg.Seq, msg.From, msg.TS, msg.Body)
+		}
 	}
 	r.mu.Unlock()
 
@@ -330,6 +347,9 @@ func (s *State) roomRead(from, room string, timeout time.Duration) Response {
 		dropped := r.dropped[from]
 		r.mailbox[from] = nil
 		r.dropped[from] = 0
+		if s.queue != nil {
+			_ = s.queue.mailboxConsumeAll(from, "room", room)
+		}
 		r.mu.Unlock()
 		return roomDrainResponse(room, q, dropped)
 	}
@@ -353,6 +373,9 @@ func (s *State) roomRead(from, room string, timeout time.Duration) Response {
 		r.mailbox[from] = nil
 		dropped := r.dropped[from]
 		r.dropped[from] = 0
+		if s.queue != nil {
+			_ = s.queue.mailboxConsumeAll(from, "room", room)
+		}
 		r.mu.Unlock()
 		all := append([]RoomMessage{first}, extra...)
 		return roomDrainResponse(room, all, dropped)

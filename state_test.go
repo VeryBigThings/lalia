@@ -276,7 +276,7 @@ func TestStateSweepExpiresAgentAndReleasesWaiter(t *testing.T) {
 
 	readDone := make(chan Response, 1)
 	go func() {
-		readDone <- ch.read("alice", 3*time.Second)
+		readDone <- ch.read(s, "alice", 3*time.Second)
 	}()
 	time.Sleep(25 * time.Millisecond)
 
@@ -324,7 +324,7 @@ func TestOpUnregisterReleasesWaitersAndEvicts(t *testing.T) {
 	ch := s.getOrCreateChannel("alice", "bob")
 	readDone := make(chan Response, 1)
 	go func() {
-		readDone <- ch.read("alice", 3*time.Second)
+		readDone <- ch.read(s, "alice", 3*time.Second)
 	}()
 	time.Sleep(25 * time.Millisecond)
 
