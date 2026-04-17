@@ -1,4 +1,4 @@
-module github.com/neektza/lesche
+module github.com/neektza/kopos
 
 go 1.26.2
 

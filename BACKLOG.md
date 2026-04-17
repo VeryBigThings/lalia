@@ -1,4 +1,4 @@
-# Lesche — Supervisor Notes
+# Kopos — Supervisor Notes
 
 If you're reading this, a human or the supervisor agent just handed
 you a workstream. You are about to write code in a repo you may not
@@ -14,7 +14,7 @@ is the single source of truth for:
 
 ## What this file is for
 
-A plan for running multiple coding agents in parallel on lesche without
+A plan for running multiple coding agents in parallel on kopos without
 stepping on each other. Each workstream is designed as a single atomic
 unit: the agent writes the feature, the tests that prove it works, and
 any doc updates. A workstream only merges when its test suite is green.
@@ -37,7 +37,7 @@ files on top of this.
    for your specific workstream.
 2. **`docs/ARCHITECTURE.md`** — how the pieces fit. Daemon/client/channel/
    room/writer/registry model.
-3. **`docs/IDEA.md`** — why lesche exists. Short.
+3. **`docs/IDEA.md`** — why kopos exists. Short.
 4. **`docs/MVP.md`** — what is shipping and what isn't. Large parts are
    retrospective now that channels / rooms / queue have landed.
 5. **`docs/CHANNELS.md`** — the messaging redesign (shipped). Read if you
@@ -46,7 +46,7 @@ files on top of this.
 6. **`protocol.go`** — wire-level request/response shapes. Currently
    safe to extend additively; workstream F (structured errors) is
    the only task allowed to rework the `Response` shape.
-7. **`help.go`** and run `lesche protocol` — the agent-facing
+7. **`help.go`** and run `kopos protocol` — the agent-facing
    protocol guide. If your workstream adds a user-visible command,
    you update both.
 8. **`state.go`** — the dispatch switch is the entry point for
@@ -68,15 +68,15 @@ named after the slug (`feat/identity`, `feat/errors`, …). Supervisor
 and assigned worker are members; other agents (reviewers, future
 inheritors, onlookers needing context) can join to peek. The room's
 git transcript survives session kills — kill a harness, come back
-the next day, `lesche history <slug> --room` replays the thread.
+the next day, `kopos history <slug> --room` replays the thread.
 
 Direct peer-to-peer channels (`tell` / `ask`) are the edge case:
 private 1:1 problem-solving, identity questions, anything the rest
 of the project genuinely shouldn't see. If the conversation is about
 a specific workstream, it probably belongs in the slug's room.
 
-Today this is manual — the supervisor runs `lesche room create <slug>`
-then `lesche join <slug>` and tells the worker to join. Workstream H
+Today this is manual — the supervisor runs `kopos room create <slug>`
+then `kopos join <slug>` and tells the worker to join. Workstream H
 will automate it (rooms auto-created by `plan assign`, owner auto-
 joined on `plan claim`).
 
@@ -98,7 +98,7 @@ on these three names and nothing else:
 Set it once per shell:
 
 ```
-export LESCHE_NAME=<your-name>
+export KOPOS_NAME=<your-name>
 ```
 
 Do not invent a new name. Do not use `claude`, `supervisor`,
@@ -109,18 +109,18 @@ first message.
 
 ### 2. Register
 
-The lesche daemon is already running at `~/.lesche/sock`. Use the
-installed binary (`which lesche`). Register yourself — idempotent,
+The kopos daemon is already running at `~/.kopos/sock`. Use the
+installed binary (`which kopos`). Register yourself — idempotent,
 reuses your existing Ed25519 key if you registered in a previous
 session:
 
 ```
-lesche register
-lesche agents                  # sanity-check: see who else is online
+kopos register
+kopos agents                  # sanity-check: see who else is online
 ```
 
 If you see `supervisor` in the agents list, the supervisor
-is up and expecting you. If not, wait and re-run `lesche agents`
+is up and expecting you. If not, wait and re-run `kopos agents`
 every minute or so until it shows up.
 
 ### 3. Announce yourself
@@ -136,7 +136,7 @@ Tell the supervisor, in one message, exactly these things:
   for `feat/identity`).
 
 ```
-lesche tell supervisor "harness: codex. assigned feat/keychain. BACKLOG.md read. no blockers."
+kopos tell supervisor "harness: codex. assigned feat/keychain. BACKLOG.md read. no blockers."
 ```
 
 No tunnel to open, no sid to track. Your channel with the supervisor
@@ -148,7 +148,7 @@ The supervisor may send you a message before you send one to them.
 To receive anything arriving on any channel or room you're in:
 
 ```
-lesche read-any --timeout 300
+kopos read-any --timeout 300
 # prints kind=peer target=supervisor (or kind=room target=…)
 # then the message body
 ```
@@ -157,19 +157,19 @@ lesche read-any --timeout 300
 Reply to a peer with:
 
 ```
-lesche tell supervisor "<your reply>"
+kopos tell supervisor "<your reply>"
 ```
 
 Or if you want to pull from just one specific peer:
 
 ```
-lesche read supervisor --timeout 300
+kopos read supervisor --timeout 300
 ```
 
 Need a synchronous question-and-answer in one call? Use `ask`:
 
 ```
-lesche ask supervisor "can I rebase on main now?" --timeout 60
+kopos ask supervisor "can I rebase on main now?" --timeout 60
 ```
 
 `ask` sends, then blocks for the peer's next message and prints it
@@ -181,8 +181,8 @@ Leases are 60 minutes; any command renews. If your harness sits idle
 for longer than that, you get dropped and any blocking read returns
 immediately. Two habits that prevent this:
 
-- Call `lesche renew` right before a long run of edits.
-- Or just run any lesche command occasionally — they all renew.
+- Call `kopos renew` right before a long run of edits.
+- Or just run any kopos command occasionally — they all renew.
 
 ### 6. Announce key moments
 
@@ -201,12 +201,12 @@ immediately. Two habits that prevent this:
 Worker session template; safe to run verbatim after step 1:
 
 ```
-export LESCHE_NAME=<your-name>
-lesche register
-lesche agents | grep supervisor || echo "supervisor not up"
-lesche channels                       # who do I already have a channel with?
-lesche peek supervisor        # anything pending?
-lesche read-any --timeout 60          # or block for the first inbound
+export KOPOS_NAME=<your-name>
+kopos register
+kopos agents | grep supervisor || echo "supervisor not up"
+kopos channels                       # who do I already have a channel with?
+kopos peek supervisor        # anything pending?
+kopos read-any --timeout 60          # or block for the first inbound
 ```
 
 If `read-any` times out and `peek` shows nothing, push first with
@@ -214,8 +214,8 @@ If `read-any` times out and `peek` shows nothing, push first with
 
 ## How to coordinate (general)
 
-All agents coordinate through lesche itself. Full protocol guide:
-run `lesche protocol`. Full help: `lesche help`.
+All agents coordinate through kopos itself. Full protocol guide:
+run `kopos protocol`. Full help: `kopos help`.
 
 ## Current state (snapshot at commit 9d192bf)
 
@@ -231,10 +231,10 @@ run `lesche protocol`. Full help: `lesche help`.
 - SQLite write queue (crash-safe message persistence, WAL mode,
   dead-letter after 3 failed commits). Merged at `d113b02`.
 - Registry with persisted JSON, 60-minute lease + renew, workspace at
-  `~/.local/state/lesche/workspace` (outside harness allowlists).
+  `~/.local/state/kopos/workspace` (outside harness allowlists).
 - Ed25519 signed requests for every authenticated op.
 - Install pipeline: `make install` places binary on `$PATH`.
-- Protocol help (`lesche protocol`) and short help (`lesche help`)
+- Protocol help (`kopos protocol`) and short help (`kopos help`)
   current for everything shipped.
 - Test suite: 32 tests via `make test`, ~2.2s runtime.
 
@@ -243,7 +243,7 @@ run `lesche protocol`. Full help: `lesche help`.
   `a907186`; not started. Needs rebase on new main before work begins.
 
 **Designed, not implemented (priority order):**
-- **I. `lesche init` + `lesche prompt` + `lesche run`** (unclaimed,
+- **I. `kopos init` + `kopos prompt` + `kopos run`** (unclaimed,
   top of queue). Role-specific onboarding prompts + harness spawn
   wrappers.
 - **H. Plan primitive + supervisor/worker roles** (unclaimed).
@@ -265,9 +265,9 @@ shipped work get the heavier ones.
 
 | Agent | Branch | Workstream | Worktree path | Status |
 |-------|--------|------------|---------------|--------|
-| `copilot` | `feat/identity` | A. Identity refactor + nicknames | `~/Obolos/lesche-identity` | Assigned. Prior shipped: feat/write-queue. Biggest-context task; copilot is the best-warmed agent on internals. Worktree exists at head `a907186`; rebase on main before starting. |
-| `codex` | `feat/errors` | F. Structured error payloads | `~/Obolos/lesche-errors` | Assigned. Prior shipped: feat/rooms. Touches every handler but mechanically simple once the helper is in place; codex is warm on the handler pattern from rooms. Create worktree + branch from current main. |
-| `claude-code` | `feat/keychain` | E. Keychain integration | `~/Obolos/lesche-keychain` | Assigned. Cold-start agent; E is the smallest and most self-contained workstream available. Create worktree + branch from current main. No `protocol.go` change, no `state.go` change — touches only `signing.go`, new `keystore.go`, `help.go`. |
+| `copilot` | `feat/identity` | A. Identity refactor + nicknames | `~/Obolos/kopos-identity` | Assigned. Prior shipped: feat/write-queue. Biggest-context task; copilot is the best-warmed agent on internals. Worktree exists at head `a907186`; rebase on main before starting. |
+| `codex` | `feat/errors` | F. Structured error payloads | `~/Obolos/kopos-errors` | Assigned. Prior shipped: feat/rooms. Touches every handler but mechanically simple once the helper is in place; codex is warm on the handler pattern from rooms. Create worktree + branch from current main. |
+| `claude-code` | `feat/keychain` | E. Keychain integration | `~/Obolos/kopos-keychain` | Assigned. Cold-start agent; E is the smallest and most self-contained workstream available. Create worktree + branch from current main. No `protocol.go` change, no `state.go` change — touches only `signing.go`, new `keystore.go`, `help.go`. |
 
 Sequencing: A, E, F can all run in parallel.
 - A ↔ F overlap on `state.go` dispatch (lightly). Last-to-merge rebases.
@@ -289,7 +289,7 @@ Merge gate unchanged: `make test` passing + human approval via
   `agents`; that's a follow-up if idle-drop keeps hurting.
 - Channels redesign shipped (workstream G). See `docs/CHANNELS.md` for
   the plan document, kept as historical context. Current behavior is
-  documented in `help.go` and `lesche protocol`.
+  documented in `help.go` and `kopos protocol`.
 
 ### Per-workstream reading list
 
@@ -310,7 +310,7 @@ Read this after the cold-start list above, before writing code.
 5. `daemon_integration_test.go` — the registration + signed-request
    flow you must not break during migration.
 6. Open question before you start: **nickname storage location**.
-   `docs/IDENTITY.md` proposes `~/.lesche/nicknames.json` outside the
+   `docs/IDENTITY.md` proposes `~/.kopos/nicknames.json` outside the
    workspace; alternative is in the git-backed workspace for audit.
    Raise this in your kickoff message to `supervisor`
    (e.g. `ask supervisor "nickname storage: home or workspace?"`).
@@ -349,12 +349,12 @@ You are cold on this codebase. E is deliberately the smallest
 available workstream. Read the cold-start list above first, then:
 
 1. `signing.go` — current implementation: keys live as files at
-   `~/.lesche/keys/<name>.key`. You will extract a keystore
+   `~/.kopos/keys/<name>.key`. You will extract a keystore
    interface with two backends: file (current default) and keychain
    (macOS Security framework). Pick a pure-Go library if one exists
    that covers macOS Keychain; otherwise cgo is acceptable (flag
    this in your kickoff message).
-2. `help.go` — document `LESCHE_KEYSTORE=keychain` env switch.
+2. `help.go` — document `KOPOS_KEYSTORE=keychain` env switch.
 3. `signing_test.go` — existing coverage pattern for the file
    backend. Mirror it for keychain, skipping on Linux / CI when
    the backend is unavailable. Verify fallback-to-file when
@@ -365,7 +365,7 @@ changes. Your footprint is `signing.go` + one new file + a help
 paragraph. If you find yourself editing anything else, stop and
 `ask supervisor`.
 
-Everyone: before writing, run `lesche protocol` to see the
+Everyone: before writing, run `kopos protocol` to see the
 agent-facing guide verbatim, and `make test` to confirm the baseline
 suite (32 tests, ~2.2s) is green on your branch.
 
@@ -383,26 +383,26 @@ updates). Merge gate is `make test` passing plus human approval via
 2. **SQLite dependency.** `modernc.org/sqlite` — pure Go, no cgo,
    static-binary story preserved. Shipped in write-queue.
 3. **Nickname storage location** still open; pick before feat/identity
-   starts. `docs/IDENTITY.md` proposes `~/.lesche/nicknames.json` (outside
+   starts. `docs/IDENTITY.md` proposes `~/.kopos/nicknames.json` (outside
    workspace). Alternative: in the workspace for git audit. Copilot
    should `ask supervisor` on kickoff.
 
 ## Parallelization principles
 
 1. **Each workstream is a branch in its own git worktree.** Naming:
-   `feat/<slug>`. Worktree: `~/Obolos/lesche-<slug>`.
+   `feat/<slug>`. Worktree: `~/Obolos/kopos-<slug>`.
 2. **One agent owns the branch end-to-end.** Feature code + unit tests
    + integration tests (where needed) + doc updates + help output
    updates. Merge blocker: `make test` passes locally.
-3. **The binary at `/opt/homebrew/bin/lesche` stays built from main.**
-   In-flight work lives only in its worktree's local `bin/lesche`.
+3. **The binary at `/opt/homebrew/bin/kopos` stays built from main.**
+   In-flight work lives only in its worktree's local `bin/kopos`.
    Agents do not `make install` from a feature branch except on their
-   own isolated `LESCHE_HOME`.
-4. **Coordination happens through lesche.** Agents announce start of
+   own isolated `KOPOS_HOME`.
+4. **Coordination happens through kopos.** Agents announce start of
    work and report completion by `tell supervisor "..."`.
    Real-time questions use the same channel via `ask` or `tell`.
 5. **Merge gate is a human decision** (for now — the user). Agent
-   reports "ready for review" over lesche; human merges when
+   reports "ready for review" over kopos; human merges when
    satisfied with the diff and a clean test run.
 
 ## File-ownership heat map
@@ -447,22 +447,22 @@ to `tunnel.go` is stale and should be read as `channel.go`.
 Each entry lists: one-line goal, scope, primary files, test
 requirements, and any sequencing constraints.
 
-### I. `lesche init` + `lesche run` harness integration  **← top of queue**
+### I. `kopos init` + `kopos run` harness integration  **← top of queue**
 
-**Goal**: Onboard a worker or supervisor agent into a lesche-
+**Goal**: Onboard a worker or supervisor agent into a kopos-
 coordinated session with one command. Three-level surface, same
 prompt content underneath:
-- `lesche init <role>` — emit the role prompt to stdout (pipe,
+- `kopos init <role>` — emit the role prompt to stdout (pipe,
   inspect, diff).
-- `lesche prompt <role>` — write the prompt to `./LESCHE.md` in
+- `kopos prompt <role>` — write the prompt to `./KOPOS.md` in
   cwd. Happy-path convenience when the human will wire the harness
   up themselves.
-- `lesche run <role> --<harness> [...args]` — write the prompt to
+- `kopos run <role> --<harness> [...args]` — write the prompt to
   the harness's preferred location and exec the harness with args
   forwarded.
 
 **Scope**:
-- New commands: `lesche init`, `lesche prompt`, `lesche run`, each
+- New commands: `kopos init`, `kopos prompt`, `kopos run`, each
   with `worker` | `supervisor` subcommand.
 - Embedded prompts via `//go:embed`: `prompts/worker.md`,
   `prompts/supervisor.md`. Edit these as markdown, print verbatim.
@@ -470,38 +470,38 @@ prompt content underneath:
   questions for the human (name / workstream / context), bootstrap
   commands in order (register, join or create the slug's room,
   peek), ongoing rules (rooms-first, checkpoint reports, never run
-  `./bin/lesche`, never set LESCHE_HOME/WORKSPACE), exit protocol
-  (`lesche unregister` on permanent shutdown).
-- `lesche run` harness mapping (verified via local CLI inspection,
+  `./bin/kopos`, never set KOPOS_HOME/WORKSPACE), exit protocol
+  (`kopos unregister` on permanent shutdown).
+- `kopos run` harness mapping (verified via local CLI inspection,
   see research in git history for citations):
-  - `--claude-code`: write LESCHE.md to cwd, exec
-    `claude --append-system-prompt-file LESCHE.md "$@"`.
-  - `--codex`: write LESCHE.md to cwd, exec
-    `codex -c experimental_instructions_file='"'$PWD/LESCHE.md'"' "$@"`.
+  - `--claude-code`: write KOPOS.md to cwd, exec
+    `claude --append-system-prompt-file KOPOS.md "$@"`.
+  - `--codex`: write KOPOS.md to cwd, exec
+    `codex -c experimental_instructions_file='"'$PWD/KOPOS.md'"' "$@"`.
     Flag is experimental; fall back to writing AGENTS.md to cwd if
     the key renames.
   - `--copilot`: no instructions-file flag exists. Write (or append
     with a heading marker) `.github/copilot-instructions.md`, then
     exec `copilot "$@"`. Require `--force` to overwrite an existing
-    file without a lesche marker.
+    file without a kopos marker.
 **Files**: new `prompts/worker.md`, new `prompts/supervisor.md`, new
 `run.go` (exec-wrapper), `client.go` (cmdInit, cmdPrompt, cmdRun),
 `main.go` (dispatch), `help.go` (document the commands).
 
 **Tests**:
-- `lesche init worker` stdout matches embedded file byte-for-byte.
-- `lesche prompt worker` writes `./LESCHE.md` with the same content;
+- `kopos init worker` stdout matches embedded file byte-for-byte.
+- `kopos prompt worker` writes `./KOPOS.md` with the same content;
   refuses to overwrite an existing file without `--force` unless the
-  file carries a lesche-written marker on the first line.
-- `lesche run worker --claude-code` with stubbed `claude` on PATH
-  writes LESCHE.md and execs with the expected flag set.
-- `lesche run worker --codex` stub test likewise.
-- `lesche run worker --copilot` without `--force` on an existing
-  `.github/copilot-instructions.md` (without lesche marker) errors
+  file carries a kopos-written marker on the first line.
+- `kopos run worker --claude-code` with stubbed `claude` on PATH
+  writes KOPOS.md and execs with the expected flag set.
+- `kopos run worker --codex` stub test likewise.
+- `kopos run worker --copilot` without `--force` on an existing
+  `.github/copilot-instructions.md` (without kopos marker) errors
   before touching the file.
 - No daemon calls: all three commands work with no running daemon.
-- Cold exec: `lesche init` / `prompt` / `run` succeed before
-  `lesche register`.
+- Cold exec: `kopos init` / `prompt` / `run` succeed before
+  `kopos register`.
 
 **Blockers**: None. Pure client-side. Does not touch `state.go`,
 `channel.go`, `room.go`, or any daemon internals.
@@ -583,7 +583,7 @@ additive workstreams (keychain). Small collision with F (struct
 errors) on `state.go`; last-to-merge rebases.
 
 **Agent fit**: Highest context requirement. Whoever owns this should
-already have full lesche internals loaded.
+already have full kopos internals loaded.
 
 ### ~~B. Room mode~~ — shipped at `e4e7186`.
 ### ~~C. SQLite write queue~~ — shipped at `d113b02`.
@@ -593,11 +593,11 @@ already have full lesche internals loaded.
 ### E. Keychain integration
 
 **Goal**: Store private keys in macOS Keychain (or system keyring on
-Linux) instead of plain files at `~/.lesche/keys/*.key`.
+Linux) instead of plain files at `~/.kopos/keys/*.key`.
 
 **Scope**: Provide a key-store abstraction with two backends: file
-(current default) and keychain. Selectable via env (`LESCHE_KEYSTORE=keychain`).
-Keychain items named `lesche:<agent_name>`. Fallback to file when
+(current default) and keychain. Selectable via env (`KOPOS_KEYSTORE=keychain`).
+Keychain items named `kopos:<agent_name>`. Fallback to file when
 keychain unavailable.
 
 **Files**: `signing.go` (swap direct-file reads for a keystore
@@ -616,7 +616,7 @@ behavior when backend is unavailable.
 
 **Goal**: Replace this markdown file as the source of truth for
 assignments. Move the assignment table into a git-backed `plan.json`
-per project, mutable via `lesche plan …` commands. Introduce a role
+per project, mutable via `kopos plan …` commands. Introduce a role
 axis on Agent (supervisor vs worker) so the daemon knows who can mutate
 what. BACKLOG.md stays for rationale, rules of engagement, cold-
 start reading — it stops holding live state.
@@ -723,7 +723,7 @@ handlers.
 A, E, F merged. Three parallel workstreams open (I, H, J); worktrees,
 rooms, and WORKER_TASK.md briefs in place, awaiting worker claim.
 
-1. **I. `lesche init` + `lesche prompt` + `lesche run`** — room
+1. **I. `kopos init` + `kopos prompt` + `kopos run`** — room
    `feat-init-run`, branch `feat/init-run`. Self-contained, no
    daemon touch.
 2. **H. Plan primitive + supervisor/worker roles** — room
@@ -737,8 +737,8 @@ rooms, and WORKER_TASK.md briefs in place, awaiting worker claim.
 
 ## Rules of engagement
 
-1. **Branch from main. Worktree at `~/Obolos/lesche-<slug>`.**
-   `git worktree add -b feat/<slug> ../lesche-<slug> main`.
+1. **Branch from main. Worktree at `~/Obolos/kopos-<slug>`.**
+   `git worktree add -b feat/<slug> ../kopos-<slug> main`.
 2. **Tests must pass before you report done.** Run `make test`. If
    it fails, do not report done.
 3. **`protocol.go` struct shapes are owned by workstream F** this
@@ -766,5 +766,5 @@ rooms, and WORKER_TASK.md briefs in place, awaiting worker claim.
   per-peer `peers/<a>--<b>/*.md`, per-room `rooms/<name>/*.md`).
   Readers on main must still parse older files after your
   workstream merges.
-- **Touching `/opt/homebrew/bin/lesche`** from a feature branch. The
+- **Touching `/opt/homebrew/bin/kopos`** from a feature branch. The
   production binary is rebuilt from main only.

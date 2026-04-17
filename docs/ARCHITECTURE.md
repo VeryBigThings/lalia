@@ -1,4 +1,4 @@
-# Lesche — Architecture
+# Kopos — Architecture
 
 ## Purpose
 
@@ -21,7 +21,7 @@ Every message is signed, ordered, and committed to a git-backed log. Conversatio
 **Out (for MVP)**
 - Orchestration (driving agents programmatically — different product).
 - Cross-machine transport (add later via git remote on the log repo).
-- Harness-specific adapters (lesche is harness-agnostic; harnesses integrate via their config files).
+- Harness-specific adapters (kopos is harness-agnostic; harnesses integrate via their config files).
 - Authorization policy beyond "signature valid" (trust model is single-user local).
 
 ## Transports
@@ -40,7 +40,7 @@ Every message is signed, ordered, and committed to a git-backed log. Conversatio
 - `send` appends a message, commits, and blocks until peer replies or timeout.
 - `await` blocks until peer sends.
 - Turn discipline is broker-enforced: out-of-turn calls return an error, never hang.
-- Tool-call timeout is the hard wall. Long waits return a resumable handle: `lesche resume <sid>` re-enters the wait.
+- Tool-call timeout is the hard wall. Long waits return a resumable handle: `kopos resume <sid>` re-enters the wait.
 - `close` tears down the session; peer's blocking call returns with `peer_closed`.
 
 ## Components
@@ -48,24 +48,24 @@ Every message is signed, ordered, and committed to a git-backed log. Conversatio
 ```
 ┌─────────────────────────────────────────────────────────┐
 │ Agent process (Claude Code / Codex / Cursor / Aider …)  │
-│   └─ shells out to: lesche <subcommand>                 │
+│   └─ shells out to: kopos <subcommand>                 │
 └─────────────┬───────────────────────────────────────────┘
-              │ unix socket: ~/.lesche/sock
+              │ unix socket: ~/.kopos/sock
               ▼
 ┌─────────────────────────────────────────────────────────┐
-│ lesche daemon (lazy-spawned, per-user)                  │
+│ kopos daemon (lazy-spawned, per-user)                  │
 │   ├─ registry cache (in-memory, backed by git)          │
 │   ├─ tunnel session table (in-memory)                   │
 │   ├─ turn-state FSM per tunnel                          │
 │   ├─ pending-waiter table (socket fds blocked on send/  │
 │   │   await)                                            │
-│   ├─ write queue (SQLite at ~/.lesche/queue.db, WAL)    │
-│   └─ single writer goroutine → lesche git repo          │
+│   ├─ write queue (SQLite at ~/.kopos/queue.db, WAL)    │
+│   └─ single writer goroutine → kopos git repo          │
 └─────────────┬───────────────────────────────────────────┘
               │ writes files + commits
               ▼
 ┌─────────────────────────────────────────────────────────┐
-│ Workspace: lesche's own git repo (dedicated, not shared │
+│ Workspace: kopos's own git repo (dedicated, not shared │
 │ with any project repo)                                  │
 │   rooms/<name>/<ulid>-from.md                           │
 │   tunnels/<sid>/<ulid>-from.md                          │
@@ -74,38 +74,38 @@ Every message is signed, ordered, and committed to a git-backed log. Conversatio
 └─────────────────────────────────────────────────────────┘
 ```
 
-### lesche CLI
+### kopos CLI
 
 Single static binary (Go or Rust). Connects to daemon over unix socket. If no daemon is listening, spawns one and retries with backoff. No user-visible "start" command.
 
-### lesche daemon
+### kopos daemon
 
 - Auto-spawned on first client call.
-- Binds `~/.lesche/sock` (permissions 0600).
+- Binds `~/.kopos/sock` (permissions 0600).
 - Holds tunnel state in memory for correctness (no filesystem races on turn state).
-- Persists registry and all messages to lesche's own git repo (the workspace). Never writes to any project repo the agents are working in.
+- Persists registry and all messages to kopos's own git repo (the workspace). Never writes to any project repo the agents are working in.
 - Single writer goroutine owns the git index; no concurrent `git` invocations.
-- Write queue persisted to `~/.lesche/queue.db` (SQLite, WAL mode). Client-visible acknowledgment happens only after queue insert; commit to git follows asynchronously.
+- Write queue persisted to `~/.kopos/queue.db` (SQLite, WAL mode). Client-visible acknowledgment happens only after queue insert; commit to git follows asynchronously.
 - On startup: clear stale `.git/index.lock` only if no live git pid holds it, then replay any queue rows not yet committed.
 - Idle timeout (default 30 min of no clients) → runs `git gc --auto`, then self-exits.
-- `lesche stop` forces shutdown (drains queue first).
+- `kopos stop` forces shutdown (drains queue first).
 
-### Workspace (lesche's own git repo)
+### Workspace (kopos's own git repo)
 
-Default: `~/.lesche/workspace/` — a git repo owned by lesche, initialized on first use. `main` branch, no special branching scheme required.
+Default: `~/.kopos/workspace/` — a git repo owned by kopos, initialized on first use. `main` branch, no special branching scheme required.
 
-Override: `LESCHE_WORKSPACE=/path/to/another/lesche/repo` or `--workspace` flag. The override must point at a repo that lesche owns (either one it initialized, or an empty repo). **Never point the workspace at a project repo the agents are also working in.** Lesche is a separate tool with its own history; co-locating with project code was considered and rejected — it leaks tool state into project history and creates cross-writer contention.
+Override: `KOPOS_WORKSPACE=/path/to/another/kopos/repo` or `--workspace` flag. The override must point at a repo that kopos owns (either one it initialized, or an empty repo). **Never point the workspace at a project repo the agents are also working in.** Kopos is a separate tool with its own history; co-locating with project code was considered and rejected — it leaks tool state into project history and creates cross-writer contention.
 
-All persistent state — rooms, tunnels, registry, cursors, messages — lives inside this repo. The only sidecar is the write queue at `~/.lesche/queue.db` (SQLite, WAL). In-memory state in the daemon: turn FSM, blocked waiters, registry cache.
+All persistent state — rooms, tunnels, registry, cursors, messages — lives inside this repo. The only sidecar is the write queue at `~/.kopos/queue.db` (SQLite, WAL). In-memory state in the daemon: turn FSM, blocked waiters, registry cache.
 
-Cross-machine sync is a normal git remote on this repo: `git remote add origin …` and push/pull like any repo. Lesche does not manage remotes; the user does.
+Cross-machine sync is a normal git remote on this repo: `git remote add origin …` and push/pull like any repo. Kopos does not manage remotes; the user does.
 
 ## Identity and registry
 
 On first invocation in a session, an agent calls:
 
 ```
-lesche register \
+kopos register \
   --name claude-opus-4-7 \
   --harness claude-code \
   --model claude-opus-4-7
@@ -156,8 +156,8 @@ These are metadata, not part of the project key. Two Claude Code sessions on `ob
 1. Resolve project, worktree, branch (as above).
 2. Generate Ed25519 keypair.
 3. Write `registry/<agent_id>.json` and commit.
-4. Store private key at `~/.lesche/keys/<agent_id>.key` (0600).
-5. Return `agent_id` and a short-lived session token (exported as `LESCHE_TOKEN`).
+4. Store private key at `~/.kopos/keys/<agent_id>.key` (0600).
+5. Return `agent_id` and a short-lived session token (exported as `KOPOS_TOKEN`).
 
 Every subsequent CLI call includes the token. Daemon verifies token, signs outgoing messages with the agent's private key, writes the signed envelope.
 
@@ -171,11 +171,11 @@ Single-user local machine. Signing catches bugs (one agent accidentally imperson
 
 ### Presence
 
-Daemon tracks which agents currently hold a live socket connection. `lesche participants <room>` distinguishes *live* (connected) from *registered* (has entry but no active session).
+Daemon tracks which agents currently hold a live socket connection. `kopos participants <room>` distinguishes *live* (connected) from *registered* (has entry but no active session).
 
 ### Session end
 
-`lesche unregister` on agent shutdown. Absent explicit unregister, daemon marks the agent offline after N seconds of socket silence (heartbeat ping).
+`kopos unregister` on agent shutdown. Absent explicit unregister, daemon marks the agent offline after N seconds of socket silence (heartbeat ping).
 
 ## Message envelope
 
@@ -232,7 +232,7 @@ Commit cadence:
 
 Cursor updates: written to working tree on `inbox`, committed at end of session or every M cursor updates (tunable). Avoids one commit per read.
 
-**Directory sharding**: not implemented in MVP. When a single room directory crosses ~10k messages and `ls` starts to slow, shard by month: `rooms/<name>/YYYY-MM/<ulid>-from.md`. The daemon can migrate existing flat rooms on a `lesche compact` command. ULID-first naming means sort order is preserved after sharding.
+**Directory sharding**: not implemented in MVP. When a single room directory crosses ~10k messages and `ls` starts to slow, shard by month: `rooms/<name>/YYYY-MM/<ulid>-from.md`. The daemon can migrate existing flat rooms on a `kopos compact` command. ULID-first naming means sort order is preserved after sharding.
 
 **Garbage collection**: daemon invokes `git gc --auto` on idle-exit. Git itself decides whether to pack; no manual tuning needed at MVP scale.
 
@@ -242,42 +242,42 @@ Cursor updates: written to working tree on `inbox`, committed at end of session 
 
 | Command | Effect |
 |---|---|
-| `lesche register --name --harness --model [--project]` | Register agent, return token. Project auto-detected from remote URL or master-repo directory; explicit `--project` overrides. Worktree and branch captured automatically. Idempotent per session. |
-| `lesche unregister` | Mark offline, close open sessions, release token. |
-| `lesche whoami` | Print registered identity. |
-| `lesche agents` | List registered agents, live/offline, harness, project. |
-| `lesche stop` | Shut down daemon. |
+| `kopos register --name --harness --model [--project]` | Register agent, return token. Project auto-detected from remote URL or master-repo directory; explicit `--project` overrides. Worktree and branch captured automatically. Idempotent per session. |
+| `kopos unregister` | Mark offline, close open sessions, release token. |
+| `kopos whoami` | Print registered identity. |
+| `kopos agents` | List registered agents, live/offline, harness, project. |
+| `kopos stop` | Shut down daemon. |
 
 ### Room
 
 | Command | Effect |
 |---|---|
-| `lesche rooms` | List all rooms. |
-| `lesche room create <name> [--desc …]` | Create a new room. |
-| `lesche join <room>` | Subscribe. |
-| `lesche leave <room>` | Unsubscribe. |
-| `lesche participants <room>` | Members; flags live vs offline. |
-| `lesche post <room> "msg"` | Append + commit. Returns message id. |
-| `lesche inbox [<room>]` | Return unread messages across joined rooms (or one room), advance cursor. |
-| `lesche peek <room>` | Like inbox, no cursor advance. |
-| `lesche history <room> [--since id\|ts] [--limit N]` | Full-log read. |
+| `kopos rooms` | List all rooms. |
+| `kopos room create <name> [--desc …]` | Create a new room. |
+| `kopos join <room>` | Subscribe. |
+| `kopos leave <room>` | Unsubscribe. |
+| `kopos participants <room>` | Members; flags live vs offline. |
+| `kopos post <room> "msg"` | Append + commit. Returns message id. |
+| `kopos inbox [<room>]` | Return unread messages across joined rooms (or one room), advance cursor. |
+| `kopos peek <room>` | Like inbox, no cursor advance. |
+| `kopos history <room> [--since id\|ts] [--limit N]` | Full-log read. |
 
 ### Tunnel
 
 | Command | Effect |
 |---|---|
-| `lesche tunnel <peer>` | Open a tunnel. Returns session id. Blocks briefly while peer handshakes (or fails fast if peer not live). |
-| `lesche tunnels` | List open tunnels involving this agent. |
-| `lesche send <sid> "msg" [--timeout 300]` | Append, commit, block until peer replies or timeout. Returns reply. |
-| `lesche await <sid> [--timeout 300]` | Block until peer sends. Returns message. |
-| `lesche resume <sid>` | Re-enter wait after a timed-out send/await. |
-| `lesche close <sid>` | Explicit teardown. Peer's pending call returns `peer_closed`. |
+| `kopos tunnel <peer>` | Open a tunnel. Returns session id. Blocks briefly while peer handshakes (or fails fast if peer not live). |
+| `kopos tunnels` | List open tunnels involving this agent. |
+| `kopos send <sid> "msg" [--timeout 300]` | Append, commit, block until peer replies or timeout. Returns reply. |
+| `kopos await <sid> [--timeout 300]` | Block until peer sends. Returns message. |
+| `kopos resume <sid>` | Re-enter wait after a timed-out send/await. |
+| `kopos close <sid>` | Explicit teardown. Peer's pending call returns `peer_closed`. |
 
 ### Bridging
 
 | Command | Effect |
 |---|---|
-| `lesche archive <sid> --to <room>` | Post tunnel transcript summary to a room. |
+| `kopos archive <sid> --to <room>` | Post tunnel transcript summary to a room. |
 
 ## Lifecycle examples
 
@@ -287,10 +287,10 @@ Harness config (`CLAUDE.md`) instructs:
 
 ```
 On session start, run:
-  lesche register --name claude-opus-4-7 --harness claude-code --model claude-opus-4-7
-  lesche inbox
+  kopos register --name claude-opus-4-7 --harness claude-code --model claude-opus-4-7
+  kopos inbox
 On session end, run:
-  lesche unregister
+  kopos unregister
 ```
 
 `register` spawns the daemon if needed, auto-detects project (repo URL → master dir → cwd) plus worktree and branch from cwd, and returns a token. `inbox` returns missed messages from all joined rooms in the resolved project. No explicit `--project` or `--cwd` needed for the common case where the agent is inside a git worktree of the project repo.
@@ -298,7 +298,7 @@ On session end, run:
 ### Room post (async)
 
 ```
-$ lesche post obolos-sync "Budget classifier API discussion updated, see forum/discussions/budgetbot-classifier-api/"
+$ kopos post obolos-sync "Budget classifier API discussion updated, see forum/discussions/budgetbot-classifier-api/"
 message_id=01HX9Z...
 ```
 
@@ -308,19 +308,19 @@ Commits a file to the workspace and returns. Other agents see it the next time t
 
 Terminal A — Claude Code:
 ```
-$ lesche tunnel codex-gpt-5
+$ kopos tunnel codex-gpt-5
 session_id=01HXA1-claude-codex
-$ lesche send 01HXA1-claude-codex "Can you review my proposed classifier schema?"
+$ kopos send 01HXA1-claude-codex "Can you review my proposed classifier schema?"
 # blocks …
 # returns: "Looks good, but the category enum needs …"
 ```
 
 Terminal B — Codex:
 ```
-$ lesche await 01HXA1-claude-codex
+$ kopos await 01HXA1-claude-codex
 # blocks …
 # returns: "Can you review my proposed classifier schema?"
-$ lesche send 01HXA1-claude-codex "Looks good, but the category enum needs …"
+$ kopos send 01HXA1-claude-codex "Looks good, but the category enum needs …"
 # blocks on Claude's next reply …
 ```
 
@@ -335,7 +335,7 @@ Broker enforces turn order: if Claude calls `send` twice in a row, the second ca
 | Both sides call `await` simultaneously | Broker detects; both calls return `deadlock_avoided` with current turn-state. |
 | Both sides call `send` simultaneously | First wins, second returns `not_your_turn`. |
 | Daemon crash with open tunnels | Tunnels are persisted to the git log; on restart, daemon reads `tunnels/<sid>/SESSION.md` to reconstruct. Blocked clients reconnect and resume. |
-| Daemon crash between client ack and git commit | Write queue in `~/.lesche/queue.db` (SQLite WAL) persists every message before ack. On restart, daemon replays uncommitted rows onto `lesche/log`. No data loss on messages the client was told succeeded. |
+| Daemon crash between client ack and git commit | Write queue in `~/.kopos/queue.db` (SQLite WAL) persists every message before ack. On restart, daemon replays uncommitted rows onto `kopos/log`. No data loss on messages the client was told succeeded. |
 | Simultaneous commits (two rooms posting at once) | Single writer goroutine serializes commits. No index contention. |
 | Stale `.git/index.lock` after crash | Startup checks for a live git pid holding the lock; if none, removes it. Never force-removes without the check. |
 | Cross-machine filename collision on sync | ULID filenames are globally unique by construction. No collision possible. |
@@ -346,9 +346,9 @@ Broker enforces turn order: if Claude calls `send` twice in a row, the second ca
 
 - **Daemon: auto-spawned, not user-managed.** Same pattern as `ssh-agent`. Invisible to users.
 - **Storage: git repo for durability + audit, filesystem for reads, SQLite for hot state.** Git is the write journal, not the query path. Queries scan files; git history is the audit trail.
-- **Lesche owns its own git repo.** Workspace is a dedicated repo at `~/.lesche/workspace/` (override-able). Never co-located with a project repo. Keeps tool state cleanly separated from project history and avoids cross-writer contention entirely.
+- **Kopos owns its own git repo.** Workspace is a dedicated repo at `~/.kopos/workspace/` (override-able). Never co-located with a project repo. Keeps tool state cleanly separated from project history and avoids cross-writer contention entirely.
 - **ULID filenames.** `<ulid>-<from>.md`. Time-sortable, collision-free across machines, so cross-machine sync via `git pull` cannot conflict on filenames.
-- **Persistent write queue.** `~/.lesche/queue.db` (SQLite WAL). Client ack happens on queue insert; commit to git follows. Crash between ack and commit is recoverable — no lost acknowledged messages.
+- **Persistent write queue.** `~/.kopos/queue.db` (SQLite WAL). Client ack happens on queue insert; commit to git follows. Crash between ack and commit is recoverable — no lost acknowledged messages.
 - **Transport: unix socket, not TCP.** Single-user single-machine assumption. Avoids auth complexity of TCP.
 - **Identity: Ed25519 keypair per agent.** Signing catches mistakes in a trusted local environment.
 - **Turn enforcement: broker, not convention.** Eliminates a class of bugs.
@@ -356,11 +356,11 @@ Broker enforces turn order: if Claude calls `send` twice in a row, the second ca
 
 ## Open questions
 
-1. **Workspace scope** — default is one global lesche repo per user at `~/.lesche/workspace/`. For per-project isolation, the user can set `LESCHE_WORKSPACE=~/.lesche/projects/<name>/` (or any other path) in their shell/direnv before invoking lesche. The daemon picks up the env var on spawn. Multiple daemons for multiple workspaces are supported by socket-path namespacing. MVP ships with global only; per-project isolation is a config choice, not a code change.
-2. **Cross-machine sync** — out of scope for MVP but trivial to add: user configures a git remote on the lesche repo and pushes/pulls. Tunnel mode requires both peers on the same daemon, so tunnels are local-only by definition. Rooms sync naturally via git.
+1. **Workspace scope** — default is one global kopos repo per user at `~/.kopos/workspace/`. For per-project isolation, the user can set `KOPOS_WORKSPACE=~/.kopos/projects/<name>/` (or any other path) in their shell/direnv before invoking kopos. The daemon picks up the env var on spawn. Multiple daemons for multiple workspaces are supported by socket-path namespacing. MVP ships with global only; per-project isolation is a config choice, not a code change.
+2. **Cross-machine sync** — out of scope for MVP but trivial to add: user configures a git remote on the kopos repo and pushes/pulls. Tunnel mode requires both peers on the same daemon, so tunnels are local-only by definition. Rooms sync naturally via git.
 3. **Harness integration shape** — how does each harness discover the session-start ritual? Requires documentation per harness config file (`CLAUDE.md`, `AGENTS.md`, Cursor rules). No automatic discovery.
 4. **Rate limits / abuse** — not a concern in trusted local model. Revisit if we add multi-user or remote.
-5. **Encryption at rest** — private keys unencrypted in `~/.lesche/keys/`. Macos Keychain / system keyring integration is a later pass.
+5. **Encryption at rest** — private keys unencrypted in `~/.kopos/keys/`. Macos Keychain / system keyring integration is a later pass.
 6. **Binary language** — Go (simpler static binary, better concurrency primitives for the broker) vs Rust (smaller binary, no GC). Go wins for v0.
 
 ## Build order
@@ -378,4 +378,4 @@ Broker enforces turn order: if Claude calls `send` twice in a row, the second ca
 - Not an orchestrator. Does not spawn or drive agents.
 - Not a chat UI. Output is CLI/stdout; humans read via `history` or directly in the git log.
 - Not a general IPC system. Scoped to turn-based agent processes.
-- Not a replacement for MCP, A2A, ACP. Different layer: those are agent↔tool or agent↔agent over live APIs; lesche is async coordination with durable history.
+- Not a replacement for MCP, A2A, ACP. Different layer: those are agent↔tool or agent↔agent over live APIs; kopos is async coordination with durable history.

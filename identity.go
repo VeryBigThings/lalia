@@ -152,7 +152,7 @@ func (s *State) ResolveAddress(addr string, nicknames map[string]Nickname) (stri
 		}
 		// stable: return agent_id directly
 		if _, exists := s.agents[nick.AgentID]; !exists {
-			return "", fmt.Errorf("nickname %q points to agent_id %s which is no longer registered; reassign with: lesche nickname %s <new-address>", addr, nick.AgentID, addr)
+			return "", fmt.Errorf("nickname %q points to agent_id %s which is no longer registered; reassign with: kopos nickname %s <new-address>", addr, nick.AgentID, addr)
 		}
 		return nick.AgentID, nil
 	}

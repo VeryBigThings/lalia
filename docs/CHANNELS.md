@@ -2,7 +2,7 @@
 
 **STATUS: shipped at `9d192bf`.** Kept in the repo as historical context
 for why the surface looks the way it does. Current behavior is
-authoritative in `help.go` / `lesche protocol`.
+authoritative in `help.go` / `kopos protocol`.
 
 ---
 
@@ -53,29 +53,29 @@ Three friction points observed in live use:
 
 ```
 # Peer-to-peer
-lesche tell <peer> "msg"               async, returns immediately
-lesche ask  <peer> "msg" [--timeout N] tell + block for next inbound from peer
-lesche read <peer>       [--timeout N] block until next inbound (0 = non-blocking)
-lesche peek <peer>                     non-destructive inspect of pending
+kopos tell <peer> "msg"               async, returns immediately
+kopos ask  <peer> "msg" [--timeout N] tell + block for next inbound from peer
+kopos read <peer>       [--timeout N] block until next inbound (0 = non-blocking)
+kopos peek <peer>                     non-destructive inspect of pending
 
 # Room
-lesche room_create <name> [--desc s]
-lesche join     <room>
-lesche leave    <room>
-lesche rooms
-lesche participants <room>
-lesche post <room> "msg"               async broadcast
-lesche read <room>  [--timeout N]      consume pending (0 = non-blocking)
-lesche peek <room>                     non-destructive inspect
+kopos room_create <name> [--desc s]
+kopos join     <room>
+kopos leave    <room>
+kopos rooms
+kopos participants <room>
+kopos post <room> "msg"               async broadcast
+kopos read <room>  [--timeout N]      consume pending (0 = non-blocking)
+kopos peek <room>                     non-destructive inspect
 
 # Housekeeping (unchanged in shape, may change args)
-lesche register | agents | renew | history <peer|room> | stop | protocol
+kopos register | agents | renew | history <peer|room> | stop | protocol
 ```
 
 Seven communication verbs total: `tell`, `ask`, `post`, `read`,
 `peek`, `join`, `leave`. Plus room/registration management.
 
-### English ↔ command mapping (ships in `lesche protocol` output)
+### English ↔ command mapping (ships in `kopos protocol` output)
 
 | Human phrasing | Command |
 |---|---|
@@ -167,7 +167,7 @@ Old ops (`tunnel`, `send`, `await`, `await-any`, `close`,
   by the fact that no further messages flow. If you want a
   visible marker in the git log, `tell <peer> "closing"` is
   sufficient. Deprecate with a notice.
-- `session` → replaced by `peek` + a new `lesche channels` listing.
+- `session` → replaced by `peek` + a new `kopos channels` listing.
 
 Exit code `4 not_your_turn` is removed from the code path. Keep
 it reserved in `protocol.go` for one release so old clients see a
@@ -178,7 +178,7 @@ stable enum, then delete in the version after.
 Current layout:
 
 ```
-~/.lesche/workspace/
+~/.kopos/workspace/
   tunnels/<sid>/SESSION.md
   tunnels/<sid>/MSG-000001.md
   ...
@@ -190,7 +190,7 @@ Current layout:
 New layout:
 
 ```
-~/.lesche/workspace/
+~/.kopos/workspace/
   peers/<a>--<b>/000001-<from>.md          # <a>, <b> sorted alphabetically
   peers/<a>--<b>/000002-<from>.md
   ...
@@ -219,7 +219,7 @@ just stop getting new writes.
 
 1. **Implicit channel creation.** `tell X` on a peer you have
    never talked to creates the channel. Is that desirable, or do
-   we want an explicit `lesche open <peer>` gate? Recommendation:
+   we want an explicit `kopos open <peer>` gate? Recommendation:
    keep implicit. Matches room-implicit-first-post and removes one
    command from the surface. Reject with `CodeNotFound` if `X` is
    not a registered agent.
@@ -301,7 +301,7 @@ Nice-to-have:
 ## Open question handed to the coordinator before this starts
 
 **Do we bump to v0.2 on this merge?** The command surface change
-is user-visible. `lesche tunnel` going away (even as a deprecated
+is user-visible. `kopos tunnel` going away (even as a deprecated
 no-op) is a breaking ergonomic change. Either:
 
 - (a) Ship as v0.2 with a CHANGELOG entry. Deprecation warnings

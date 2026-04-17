@@ -115,7 +115,7 @@ func findAssignment(p *Plan, slug string) *Assignment {
 func (s *State) requireSupervisor(from, projectID string) (Response, bool) {
 	a := s.agentByName(from)
 	if a == nil {
-		return errorResponse(CodeUnauthorized, "not_registered", "run lesche register", "not registered: "+from, map[string]any{"from": from}), false
+		return errorResponse(CodeUnauthorized, "not_registered", "run kopos register", "not registered: "+from, map[string]any{"from": from}), false
 	}
 	if a.Role != "supervisor" {
 		return errorResponse(CodeUnauthorized, "not_supervisor", "register with --role supervisor", "caller is not a supervisor: "+from, map[string]any{"from": from}), false
@@ -281,7 +281,7 @@ func (s *State) opPlanCreate(req Request) Response {
 	pid := strVal(req.Args, "project")
 
 	if from == "" {
-		return errorResponse(CodeError, "missing_from", "set LESCHE_NAME or pass --as", "from required", nil)
+		return errorResponse(CodeError, "missing_from", "set KOPOS_NAME or pass --as", "from required", nil)
 	}
 	if slug == "" {
 		return errorResponse(CodeError, "missing_slug", "provide a slug for the new assignment", "slug required", nil)
@@ -331,7 +331,7 @@ func (s *State) opPlanAssign(req Request) Response {
 	pid := strVal(req.Args, "project")
 
 	if from == "" {
-		return errorResponse(CodeError, "missing_from", "set LESCHE_NAME or pass --as", "from required", nil)
+		return errorResponse(CodeError, "missing_from", "set KOPOS_NAME or pass --as", "from required", nil)
 	}
 	if slug == "" || owner == "" {
 		return errorResponse(CodeError, "missing_params", "provide slug and owner", "slug and owner required", map[string]any{"slug": slug, "owner": owner})
@@ -396,7 +396,7 @@ func (s *State) opPlanUnassign(req Request) Response {
 	pid := strVal(req.Args, "project")
 
 	if from == "" {
-		return errorResponse(CodeError, "missing_from", "set LESCHE_NAME or pass --as", "from required", nil)
+		return errorResponse(CodeError, "missing_from", "set KOPOS_NAME or pass --as", "from required", nil)
 	}
 	if slug == "" {
 		return errorResponse(CodeError, "missing_slug", "provide the slug to unassign", "slug required", nil)
@@ -418,7 +418,7 @@ func (s *State) opPlanUnassign(req Request) Response {
 	asgn := findAssignment(plan, slug)
 	if asgn == nil {
 		s.mu.Unlock()
-		return errorResponse(CodeNotFound, "slug_not_found", "check lesche plan show for available slugs", "slug not found: "+slug, map[string]any{"slug": slug})
+		return errorResponse(CodeNotFound, "slug_not_found", "check kopos plan show for available slugs", "slug not found: "+slug, map[string]any{"slug": slug})
 	}
 	asgn.Owner = ""
 	asgn.Status = statusOpen
@@ -442,7 +442,7 @@ func (s *State) opPlanStatus(req Request) Response {
 	pid := strVal(req.Args, "project")
 
 	if from == "" {
-		return errorResponse(CodeError, "missing_from", "set LESCHE_NAME or pass --as", "from required", nil)
+		return errorResponse(CodeError, "missing_from", "set KOPOS_NAME or pass --as", "from required", nil)
 	}
 	if slug == "" || status == "" {
 		return errorResponse(CodeError, "missing_params", "provide slug and status", "slug and status required", nil)
@@ -460,7 +460,7 @@ func (s *State) opPlanStatus(req Request) Response {
 	asgn := findAssignment(plan, slug)
 	if asgn == nil {
 		s.mu.Unlock()
-		return errorResponse(CodeNotFound, "slug_not_found", "check lesche plan show for available slugs", "slug not found: "+slug, map[string]any{"slug": slug})
+		return errorResponse(CodeNotFound, "slug_not_found", "check kopos plan show for available slugs", "slug not found: "+slug, map[string]any{"slug": slug})
 	}
 	isSupervisor := plan.Supervisor == from
 	isOwner := asgn.Owner == from
@@ -502,7 +502,7 @@ func (s *State) opPlanClaim(req Request) Response {
 	pid := strVal(req.Args, "project")
 
 	if from == "" {
-		return errorResponse(CodeError, "missing_from", "set LESCHE_NAME or pass --as", "from required", nil)
+		return errorResponse(CodeError, "missing_from", "set KOPOS_NAME or pass --as", "from required", nil)
 	}
 	if slug == "" {
 		return errorResponse(CodeError, "missing_slug", "provide the slug to claim", "slug required", nil)
@@ -525,7 +525,7 @@ func (s *State) opPlanClaim(req Request) Response {
 	asgn := findAssignment(plan, slug)
 	if asgn == nil {
 		s.mu.Unlock()
-		return errorResponse(CodeNotFound, "slug_not_found", "check lesche plan show for available slugs", "slug not found: "+slug, map[string]any{"slug": slug})
+		return errorResponse(CodeNotFound, "slug_not_found", "check kopos plan show for available slugs", "slug not found: "+slug, map[string]any{"slug": slug})
 	}
 	if asgn.Status != statusOpen {
 		s.mu.Unlock()
@@ -566,7 +566,7 @@ func (s *State) opPlanShow(req Request) Response {
 func (s *State) opPlanList(req Request) Response {
 	from := strVal(req.Args, "from")
 	if from == "" {
-		return errorResponse(CodeError, "missing_from", "set LESCHE_NAME or pass --as", "from required", nil)
+		return errorResponse(CodeError, "missing_from", "set KOPOS_NAME or pass --as", "from required", nil)
 	}
 
 	s.mu.Lock()
@@ -600,7 +600,7 @@ func (s *State) opPlanHandoff(req Request) Response {
 	pid := strVal(req.Args, "project")
 
 	if from == "" {
-		return errorResponse(CodeError, "missing_from", "set LESCHE_NAME or pass --as", "from required", nil)
+		return errorResponse(CodeError, "missing_from", "set KOPOS_NAME or pass --as", "from required", nil)
 	}
 	if newSup == "" {
 		return errorResponse(CodeError, "missing_to", "provide the new supervisor's agent name", "to required", nil)

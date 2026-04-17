@@ -12,8 +12,8 @@ import (
 )
 
 func TestSigningRegisterCreatesAndReusesKey(t *testing.T) {
-	lescheHome := setupIntegrationEnv(t)
-	defer stopDaemonForHome(t, lescheHome)
+	koposHome := setupIntegrationEnv(t)
+	defer stopDaemonForHome(t, koposHome)
 
 	first := mustRequest(t, "register", map[string]any{"name": "alice", "pid": float64(111)})
 	if !first.OK {
@@ -58,8 +58,8 @@ func TestSigningRegisterCreatesAndReusesKey(t *testing.T) {
 // TestSigningTellWithValidSignatureSucceeds verifies a signed tell round-trips
 // and the peer can read it.
 func TestSigningTellWithValidSignatureSucceeds(t *testing.T) {
-	lescheHome := setupIntegrationEnv(t)
-	defer stopDaemonForHome(t, lescheHome)
+	koposHome := setupIntegrationEnv(t)
+	defer stopDaemonForHome(t, koposHome)
 
 	mustRequest(t, "register", map[string]any{"name": "alice", "pid": float64(301)})
 	mustRequest(t, "register", map[string]any{"name": "bob", "pid": float64(302)})
@@ -80,8 +80,8 @@ func TestSigningTellWithValidSignatureSucceeds(t *testing.T) {
 // TestSigningTellMissingKeyFailsClientSide removes alice's key and verifies
 // the client refuses to sign.
 func TestSigningTellMissingKeyFailsClientSide(t *testing.T) {
-	lescheHome := setupIntegrationEnv(t)
-	defer stopDaemonForHome(t, lescheHome)
+	koposHome := setupIntegrationEnv(t)
+	defer stopDaemonForHome(t, koposHome)
 
 	mustRequest(t, "register", map[string]any{"name": "alice", "pid": float64(401)})
 	mustRequest(t, "register", map[string]any{"name": "bob", "pid": float64(402)})
@@ -102,8 +102,8 @@ func TestSigningTellMissingKeyFailsClientSide(t *testing.T) {
 // TestSigningTellWrongKeyRejectedByServer swaps alice's key for a fresh
 // unrelated pair; the daemon must reject the signature.
 func TestSigningTellWrongKeyRejectedByServer(t *testing.T) {
-	lescheHome := setupIntegrationEnv(t)
-	defer stopDaemonForHome(t, lescheHome)
+	koposHome := setupIntegrationEnv(t)
+	defer stopDaemonForHome(t, koposHome)
 
 	mustRequest(t, "register", map[string]any{"name": "alice", "pid": float64(501)})
 	mustRequest(t, "register", map[string]any{"name": "bob", "pid": float64(502)})
@@ -129,8 +129,8 @@ func TestSigningTellWrongKeyRejectedByServer(t *testing.T) {
 }
 
 func TestSigningNonRegisteredCallerUnauthorized(t *testing.T) {
-	lescheHome := setupIntegrationEnv(t)
-	defer stopDaemonForHome(t, lescheHome)
+	koposHome := setupIntegrationEnv(t)
+	defer stopDaemonForHome(t, koposHome)
 
 	mustRequest(t, "register", map[string]any{"name": "alice", "pid": float64(601)})
 
@@ -154,8 +154,8 @@ func TestSigningNonRegisteredCallerUnauthorized(t *testing.T) {
 // a private key without corruption.
 func TestKeystoreFileRoundTrip(t *testing.T) {
 	base := t.TempDir()
-	t.Setenv("LESCHE_HOME", base)
-	t.Setenv("LESCHE_KEYSTORE", "")
+	t.Setenv("KOPOS_HOME", base)
+	t.Setenv("KOPOS_KEYSTORE", "")
 
 	_, priv, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
@@ -180,7 +180,7 @@ func TestKeystoreKeychainRoundTrip(t *testing.T) {
 	if newKeychainBackend() == nil {
 		t.Skip("keychain backend unavailable on this platform")
 	}
-	name := "lesche-keystore-test-roundtrip"
+	name := "kopos-keystore-test-roundtrip"
 	t.Cleanup(func() {
 		exec.Command("security", "delete-generic-password", "-s", keychainService, "-a", name).Run() //nolint
 	})
@@ -208,7 +208,7 @@ func TestKeystoreKeychainUpdate(t *testing.T) {
 	if newKeychainBackend() == nil {
 		t.Skip("keychain backend unavailable on this platform")
 	}
-	name := "lesche-keystore-test-update"
+	name := "kopos-keystore-test-update"
 	t.Cleanup(func() {
 		exec.Command("security", "delete-generic-password", "-s", keychainService, "-a", name).Run() //nolint
 	})
@@ -232,7 +232,7 @@ func TestKeystoreKeychainUpdate(t *testing.T) {
 	}
 }
 
-// TestKeystoreKeychainFallbackToFile verifies that when LESCHE_KEYSTORE=keychain
+// TestKeystoreKeychainFallbackToFile verifies that when KOPOS_KEYSTORE=keychain
 // but the keychain backend is unavailable, newKeystore() returns a fileKeystore.
 // This test only runs on platforms where the keychain backend is absent.
 func TestKeystoreKeychainFallbackToFile(t *testing.T) {
@@ -240,8 +240,8 @@ func TestKeystoreKeychainFallbackToFile(t *testing.T) {
 		t.Skip("keychain backend available; fallback path not exercised here")
 	}
 	base := t.TempDir()
-	t.Setenv("LESCHE_HOME", base)
-	t.Setenv("LESCHE_KEYSTORE", "keychain")
+	t.Setenv("KOPOS_HOME", base)
+	t.Setenv("KOPOS_KEYSTORE", "keychain")
 
 	ks := newKeystore()
 	if _, ok := ks.(*fileKeystore); !ok {
@@ -250,16 +250,16 @@ func TestKeystoreKeychainFallbackToFile(t *testing.T) {
 }
 
 // TestKeystoreEnsureKeyUsesKeychain confirms that ensureKey round-trips
-// through the keychain backend when LESCHE_KEYSTORE=keychain.
+// through the keychain backend when KOPOS_KEYSTORE=keychain.
 func TestKeystoreEnsureKeyUsesKeychain(t *testing.T) {
 	if newKeychainBackend() == nil {
 		t.Skip("keychain backend unavailable on this platform")
 	}
-	name := "lesche-keystore-test-ensurekey"
+	name := "kopos-keystore-test-ensurekey"
 	t.Cleanup(func() {
 		exec.Command("security", "delete-generic-password", "-s", keychainService, "-a", name).Run() //nolint
 	})
-	t.Setenv("LESCHE_KEYSTORE", "keychain")
+	t.Setenv("KOPOS_KEYSTORE", "keychain")
 
 	pub1, priv1, err := ensureKey(name)
 	if err != nil {
@@ -281,8 +281,8 @@ func TestKeystoreEnsureKeyUsesKeychain(t *testing.T) {
 // a subsequent Load returns an error.
 func TestKeystoreFileDelete(t *testing.T) {
 	base := t.TempDir()
-	t.Setenv("LESCHE_HOME", base)
-	t.Setenv("LESCHE_KEYSTORE", "")
+	t.Setenv("KOPOS_HOME", base)
+	t.Setenv("KOPOS_KEYSTORE", "")
 
 	_, priv, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
@@ -310,7 +310,7 @@ func TestKeystoreKeychainDelete(t *testing.T) {
 	if newKeychainBackend() == nil {
 		t.Skip("keychain backend unavailable on this platform")
 	}
-	name := "lesche-keystore-test-delete"
+	name := "kopos-keystore-test-delete"
 	t.Cleanup(func() {
 		exec.Command("security", "delete-generic-password", "-s", keychainService, "-a", name).Run() //nolint
 	})

@@ -1,8 +1,8 @@
-# Lesche — Idea
+# Kopos — Idea
 
 ## What it is
 
-Lesche is a CLI tool that lets coding agents running in different harnesses
+Kopos is a CLI tool that lets coding agents running in different harnesses
 (Claude Code, Codex, Cursor, Aider, etc.) talk to each other in real time and
 coordinate asynchronously. Every exchange is identity-stamped and committed
 to a git-backed log so the full conversation is durable and auditable.
@@ -37,7 +37,7 @@ Existing options are all wrong-shaped:
 
 What's missing is a local communication substrate that treats agents as what
 they actually are: turn-based processes, invoked by a human, with bounded
-lifetimes and no live event loop. Lesche is that substrate.
+lifetimes and no live event loop. Kopos is that substrate.
 
 ## Why it matters
 
@@ -52,23 +52,23 @@ grows. Without one:
   every branch.
 - No audit trail of what was decided between models.
 
-With Lesche, any two sessions on the same machine can open a tunnel, hold a
+With Kopos, any two sessions on the same machine can open a tunnel, hold a
 live conversation, and commit the transcript. Any group of sessions can share
 a room and coordinate asynchronously over durable history. The human stops
 being the message bus.
 
 ## How it works
 
-- Single binary, `lesche`.
-- Auto-spawned daemon listens on a unix socket at `~/.lesche/sock`.
+- Single binary, `kopos`.
+- Auto-spawned daemon listens on a unix socket at `~/.kopos/sock`.
 - Each agent registers with a name and a per-session identity. Post-MVP
   registration includes auto-detected project (resolved from repo remote URL
   so worktrees of the same repo share one project namespace) plus branch and
   worktree metadata.
 - Tunnels enforce strict turn alternation in the daemon, not by convention;
   out-of-turn calls fail fast with a named exit code rather than hanging.
-- Every message is committed to a git repo at `~/.lesche/workspace/`. The
-  workspace is lesche's own repo, never co-located with any project repo it
+- Every message is committed to a git repo at `~/.kopos/workspace/`. The
+  workspace is kopos's own repo, never co-located with any project repo it
   observes.
 - Messages that span shells stay coherent because state lives in the daemon,
   not in the invoking process's environment.
@@ -85,7 +85,7 @@ being the message bus.
    clients cannot violate it by accident.
 5. **Local first.** Single-user single-machine by default. Cross-machine is
    a `git remote add origin` away, not a rewrite.
-6. **Match the layer.** Lesche is a coordination substrate, not an
+6. **Match the layer.** Kopos is a coordination substrate, not an
    orchestrator. It does not spawn or drive agents; it lets agents already
    running reach each other.
 
@@ -93,7 +93,7 @@ being the message bus.
 
 - Not an agent orchestrator. Does not start, stop, or prompt other agents.
 - Not a replacement for A2A / MCP / ACP. Different layer — those are
-  agent-as-service protocols; lesche is async coordination with durable
+  agent-as-service protocols; kopos is async coordination with durable
   history for turn-based processes.
 - Not a chat UI. Output is stdout and git history. Humans read via
   `git log` or a future inspector tool.
@@ -108,8 +108,8 @@ where agents commit durable artifacts — architecture, plans, discussions,
 worklogs — for other agents to read later. It is fully asynchronous and
 session-independent.
 
-Lesche is the complement. Where the forum is "six-month durability," lesche
+Kopos is the complement. Where the forum is "six-month durability," kopos
 is "six-minute synchronous negotiation." An agent working on Obolos might
-post a proposal to the forum, then open a lesche tunnel to discuss it live
+post a proposal to the forum, then open a kopos tunnel to discuss it live
 with another agent, then archive the decision back to the forum. Both
 primitives are needed.

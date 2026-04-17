@@ -10,8 +10,8 @@ import (
 // TestULIDStabilityAcrossReRegister: re-registering the same name reuses the
 // same AgentID (as long as the key file is intact).
 func TestULIDStabilityAcrossReRegister(t *testing.T) {
-	t.Setenv("LESCHE_HOME", t.TempDir())
-	t.Setenv("LESCHE_WORKSPACE", filepath.Join(t.TempDir(), "workspace"))
+	t.Setenv("KOPOS_HOME", t.TempDir())
+	t.Setenv("KOPOS_WORKSPACE", filepath.Join(t.TempDir(), "workspace"))
 	s := newFixtureState()
 
 	r1 := s.opRegister(Request{Args: map[string]any{"name": "alice", "pid": float64(1)}})
@@ -35,8 +35,8 @@ func TestULIDStabilityAcrossReRegister(t *testing.T) {
 // a different AgentID.
 func TestULIDFreshOnKeyDelete(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("LESCHE_HOME", home)
-	t.Setenv("LESCHE_WORKSPACE", filepath.Join(t.TempDir(), "workspace"))
+	t.Setenv("KOPOS_HOME", home)
+	t.Setenv("KOPOS_WORKSPACE", filepath.Join(t.TempDir(), "workspace"))
 	s := newFixtureState()
 
 	r1 := s.opRegister(Request{Args: map[string]any{"name": "alice", "pid": float64(1)}})
@@ -85,8 +85,8 @@ func TestResolverBareNameUnique(t *testing.T) {
 
 // TestResolverBareNameAmbiguous: two agents with same name → error listing both.
 func TestResolverBareNameAmbiguous(t *testing.T) {
-	t.Setenv("LESCHE_HOME", t.TempDir())
-	t.Setenv("LESCHE_WORKSPACE", filepath.Join(t.TempDir(), "workspace"))
+	t.Setenv("KOPOS_HOME", t.TempDir())
+	t.Setenv("KOPOS_WORKSPACE", filepath.Join(t.TempDir(), "workspace"))
 	s := newFixtureState()
 	mustRegister(t, s, "alice", 1)
 
@@ -114,8 +114,8 @@ func TestResolverBareNameAmbiguous(t *testing.T) {
 
 // TestResolverQualified: name@project and name@project:branch resolve correctly.
 func TestResolverQualified(t *testing.T) {
-	t.Setenv("LESCHE_HOME", t.TempDir())
-	t.Setenv("LESCHE_WORKSPACE", filepath.Join(t.TempDir(), "workspace"))
+	t.Setenv("KOPOS_HOME", t.TempDir())
+	t.Setenv("KOPOS_WORKSPACE", filepath.Join(t.TempDir(), "workspace"))
 	s := newFixtureState()
 
 	id := newAgentID()
@@ -192,7 +192,7 @@ func TestResolverNicknameStable(t *testing.T) {
 
 // TestNicknameAssignListDelete: nickname file CRUD works end-to-end.
 func TestNicknameAssignListDelete(t *testing.T) {
-	t.Setenv("LESCHE_HOME", t.TempDir())
+	t.Setenv("KOPOS_HOME", t.TempDir())
 
 	nicknames := map[string]Nickname{
 		"rev":   {Mode: "stable", AgentID: "01FAKEID0000000000000000000", Address: "alice@proj:main"},
@@ -235,8 +235,8 @@ func TestNicknameAssignListDelete(t *testing.T) {
 func TestAgentRegistryMigration(t *testing.T) {
 	home := t.TempDir()
 	workspace := filepath.Join(t.TempDir(), "workspace")
-	t.Setenv("LESCHE_HOME", home)
-	t.Setenv("LESCHE_WORKSPACE", workspace)
+	t.Setenv("KOPOS_HOME", home)
+	t.Setenv("KOPOS_WORKSPACE", workspace)
 
 	// Write a legacy name-keyed registry file (no agent_id field)
 	regDir := filepath.Join(workspace, "registry")
@@ -283,7 +283,7 @@ func TestAgentRegistryMigration(t *testing.T) {
 
 // TestAgentsOutputHasNewFields: opAgents now returns agent_id, qualified, harness.
 func TestAgentsOutputHasNewFields(t *testing.T) {
-	t.Setenv("LESCHE_HOME", t.TempDir())
+	t.Setenv("KOPOS_HOME", t.TempDir())
 	s := newFixtureState()
 	mustRegister(t, s, "alice", 1)
 

@@ -12,9 +12,9 @@ import (
 )
 
 const (
-	managedPromptMarker = "<!-- lesche:managed -->"
-	copilotBeginMarker  = "<!-- lesche-begin -->"
-	copilotEndMarker    = "<!-- lesche-end -->"
+	managedPromptMarker = "<!-- kopos:managed -->"
+	copilotBeginMarker  = "<!-- kopos-begin -->"
+	copilotEndMarker    = "<!-- kopos-end -->"
 )
 
 //go:embed prompts/worker.md
@@ -53,18 +53,18 @@ func runHarness(role, harness string, force bool, harnessArgs []string) error {
 		return err
 	}
 
-	leschePath := filepath.Join(cwd, "LESCHE.md")
+	koposPath := filepath.Join(cwd, "KOPOS.md")
 	switch harness {
 	case "--claude-code":
-		if err := writeManagedPromptFile(leschePath, prompt, force); err != nil {
+		if err := writeManagedPromptFile(koposPath, prompt, force); err != nil {
 			return err
 		}
-		return runExternal("claude", append([]string{"--append-system-prompt-file", "LESCHE.md"}, harnessArgs...))
+		return runExternal("claude", append([]string{"--append-system-prompt-file", "KOPOS.md"}, harnessArgs...))
 	case "--codex":
-		if err := writeManagedPromptFile(leschePath, prompt, force); err != nil {
+		if err := writeManagedPromptFile(koposPath, prompt, force); err != nil {
 			return err
 		}
-		configArg := fmt.Sprintf("experimental_instructions_file=%q", leschePath)
+		configArg := fmt.Sprintf("experimental_instructions_file=%q", koposPath)
 		errText, err := runExternalCaptureStderr("codex", append([]string{"-c", configArg}, harnessArgs...))
 		if err == nil {
 			return nil

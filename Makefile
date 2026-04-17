@@ -1,10 +1,10 @@
-# Lesche build + install pipeline.
+# Kopos build + install pipeline.
 #
 # Usage:
-#   make build      build the binary into ./bin/lesche
+#   make build      build the binary into ./bin/kopos
 #   make test       go test ./...
-#   make install    build + copy to $(PREFIX)/bin/lesche, kick the daemon
-#   make uninstall  remove $(PREFIX)/bin/lesche, kick the daemon
+#   make install    build + copy to $(PREFIX)/bin/kopos, kick the daemon
+#   make uninstall  remove $(PREFIX)/bin/kopos, kick the daemon
 #   make reload     kick the daemon so next invocation spawns a fresh one
 #   make clean      remove ./bin/
 #
@@ -17,7 +17,7 @@
 # Override with:  make install PREFIX=/somewhere/else
 
 GO       ?= go
-BIN      := lesche
+BIN      := kopos
 BUILD_DIR:= bin
 TARGET   := $(BUILD_DIR)/$(BIN)
 
@@ -48,7 +48,7 @@ LDFLAGS := -X main.version=$(VERSION)
 .PHONY: build test install uninstall reload clean help
 
 help:
-	@echo "lesche build pipeline"
+	@echo "kopos build pipeline"
 	@echo ""
 	@echo "Targets:"
 	@echo "  build      build $(TARGET) (version=$(VERSION))"
@@ -85,7 +85,7 @@ uninstall:
 	fi
 	@$(MAKE) --no-print-directory reload
 
-# Kick the daemon so the next lesche command spawns a fresh one against
+# Kick the daemon so the next kopos command spawns a fresh one against
 # the current binary. Registered agents stay registered because the
 # registry persists to the workspace git repo; open tunnels die because
 # they are in-memory only. A running agent's blocked call returns with

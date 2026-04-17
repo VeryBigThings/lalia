@@ -6,11 +6,11 @@ import (
 	"os"
 )
 
-// keychainService is the Keychain service name used for all lesche key items.
-const keychainService = "lesche"
+// keychainService is the Keychain service name used for all kopos key items.
+const keychainService = "kopos"
 
 // Keystore abstracts private key storage. Two backends: file (default) and
-// keychain (macOS Keychain via security CLI, enabled by LESCHE_KEYSTORE=keychain).
+// keychain (macOS Keychain via security CLI, enabled by KOPOS_KEYSTORE=keychain).
 type Keystore interface {
 	Load(name string) (ed25519.PrivateKey, error)
 	Save(name string, key ed25519.PrivateKey) error
@@ -18,10 +18,10 @@ type Keystore interface {
 	Delete(name string) error
 }
 
-// newKeystore returns the active backend. If LESCHE_KEYSTORE=keychain and the
+// newKeystore returns the active backend. If KOPOS_KEYSTORE=keychain and the
 // keychain backend initialises without error, it is used; otherwise file.
 func newKeystore() Keystore {
-	if os.Getenv("LESCHE_KEYSTORE") == "keychain" {
+	if os.Getenv("KOPOS_KEYSTORE") == "keychain" {
 		if ks := newKeychainBackend(); ks != nil {
 			return ks
 		}
@@ -29,7 +29,7 @@ func newKeystore() Keystore {
 	return &fileKeystore{}
 }
 
-// fileKeystore stores keys as raw bytes at ~/.lesche/keys/<name>.key.
+// fileKeystore stores keys as raw bytes at ~/.kopos/keys/<name>.key.
 type fileKeystore struct{}
 
 func (f *fileKeystore) Load(name string) (ed25519.PrivateKey, error) {

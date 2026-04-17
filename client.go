@@ -96,13 +96,13 @@ func callerName(args []string) string {
 	if v := parseFlag(args, "--as"); v != "" {
 		return v
 	}
-	return os.Getenv("LESCHE_NAME")
+	return os.Getenv("KOPOS_NAME")
 }
 
 func mustCaller(args []string) string {
 	from := callerName(args)
 	if from == "" {
-		fmt.Fprintln(os.Stderr, "caller identity required (LESCHE_NAME or --as)")
+		fmt.Fprintln(os.Stderr, "caller identity required (KOPOS_NAME or --as)")
 		os.Exit(1)
 	}
 	return from
@@ -111,10 +111,10 @@ func mustCaller(args []string) string {
 func cmdRegister(args []string) {
 	name := parseFlag(args, "--name")
 	if name == "" {
-		name = os.Getenv("LESCHE_NAME")
+		name = os.Getenv("KOPOS_NAME")
 	}
 	if name == "" {
-		fmt.Fprintln(os.Stderr, "--name or LESCHE_NAME required")
+		fmt.Fprintln(os.Stderr, "--name or KOPOS_NAME required")
 		os.Exit(1)
 	}
 
@@ -210,13 +210,13 @@ func cmdRooms(args []string) {
 
 func cmdRoom(args []string) {
 	if len(args) < 1 {
-		fmt.Fprintln(os.Stderr, "usage: lesche room create <name> [--desc <text>]")
+		fmt.Fprintln(os.Stderr, "usage: kopos room create <name> [--desc <text>]")
 		os.Exit(1)
 	}
 	switch args[0] {
 	case "create":
 		if len(args) < 2 {
-			fmt.Fprintln(os.Stderr, "usage: lesche room create <name> [--desc <text>]")
+			fmt.Fprintln(os.Stderr, "usage: kopos room create <name> [--desc <text>]")
 			os.Exit(1)
 		}
 		from := mustCaller(args)
@@ -234,7 +234,7 @@ func cmdRoom(args []string) {
 
 func cmdJoin(args []string) {
 	if len(args) < 1 {
-		fmt.Fprintln(os.Stderr, "usage: lesche join <room>")
+		fmt.Fprintln(os.Stderr, "usage: kopos join <room>")
 		os.Exit(1)
 	}
 	from := mustCaller(args)
@@ -244,7 +244,7 @@ func cmdJoin(args []string) {
 
 func cmdLeave(args []string) {
 	if len(args) < 1 {
-		fmt.Fprintln(os.Stderr, "usage: lesche leave <room>")
+		fmt.Fprintln(os.Stderr, "usage: kopos leave <room>")
 		os.Exit(1)
 	}
 	from := mustCaller(args)
@@ -254,7 +254,7 @@ func cmdLeave(args []string) {
 
 func cmdParticipants(args []string) {
 	if len(args) < 1 {
-		fmt.Fprintln(os.Stderr, "usage: lesche participants <room>")
+		fmt.Fprintln(os.Stderr, "usage: kopos participants <room>")
 		os.Exit(1)
 	}
 	from := mustCaller(args)
@@ -271,7 +271,7 @@ func cmdParticipants(args []string) {
 
 func cmdPost(args []string) {
 	if len(args) < 2 {
-		fmt.Fprintln(os.Stderr, "usage: lesche post <room> <msg>")
+		fmt.Fprintln(os.Stderr, "usage: kopos post <room> <msg>")
 		os.Exit(1)
 	}
 	from := mustCaller(args)
@@ -283,11 +283,11 @@ func cmdPost(args []string) {
 	})
 }
 
-// cmdTell: lesche tell <peer> <msg>
+// cmdTell: kopos tell <peer> <msg>
 // Fire-and-forget. Returns immediately.
 func cmdTell(args []string) {
 	if len(args) < 2 {
-		fmt.Fprintln(os.Stderr, "usage: lesche tell <peer> <msg>")
+		fmt.Fprintln(os.Stderr, "usage: kopos tell <peer> <msg>")
 		os.Exit(1)
 	}
 	from := mustCaller(args)
@@ -299,12 +299,12 @@ func cmdTell(args []string) {
 	})
 }
 
-// cmdAsk: lesche ask <peer> <msg> [--timeout N]
+// cmdAsk: kopos ask <peer> <msg> [--timeout N]
 // Client-side composition: tell + read. Sends, then blocks up to timeout
 // waiting for a reply from the same peer.
 func cmdAsk(args []string) {
 	if len(args) < 2 {
-		fmt.Fprintln(os.Stderr, "usage: lesche ask <peer> <msg> [--timeout N]")
+		fmt.Fprintln(os.Stderr, "usage: kopos ask <peer> <msg> [--timeout N]")
 		os.Exit(1)
 	}
 	from := mustCaller(args)
@@ -329,12 +329,12 @@ func cmdAsk(args []string) {
 	})
 }
 
-// cmdRead: lesche read <target> [--room] [--timeout N]
+// cmdRead: kopos read <target> [--room] [--timeout N]
 // Consumes oldest pending message. target is a peer by default; pass --room
 // to read from a room with the same name instead.
 func cmdRead(args []string) {
 	if len(args) < 1 {
-		fmt.Fprintln(os.Stderr, "usage: lesche read <peer|room> [--room] [--timeout N]")
+		fmt.Fprintln(os.Stderr, "usage: kopos read <peer|room> [--room] [--timeout N]")
 		os.Exit(1)
 	}
 	from := mustCaller(args)
@@ -365,10 +365,10 @@ func cmdRead(args []string) {
 	})
 }
 
-// cmdPeek: lesche peek <target> [--room]
+// cmdPeek: kopos peek <target> [--room]
 func cmdPeek(args []string) {
 	if len(args) < 1 {
-		fmt.Fprintln(os.Stderr, "usage: lesche peek <peer|room> [--room]")
+		fmt.Fprintln(os.Stderr, "usage: kopos peek <peer|room> [--room]")
 		os.Exit(1)
 	}
 	from := mustCaller(args)
@@ -399,7 +399,7 @@ func cmdPeek(args []string) {
 	})
 }
 
-// cmdReadAny: lesche read-any [--timeout N]
+// cmdReadAny: kopos read-any [--timeout N]
 // Blocks until any channel or room delivers a message to the caller.
 // Prints the source kind+target on the first line, body on subsequent lines.
 func cmdReadAny(args []string) {
@@ -413,7 +413,7 @@ func cmdReadAny(args []string) {
 	})
 }
 
-// cmdChannels: lesche channels — list caller's peer-pair channels.
+// cmdChannels: kopos channels — list caller's peer-pair channels.
 func cmdChannels(args []string) {
 	from := mustCaller(args)
 	resp, err := request("channels", map[string]any{"from": from})
@@ -426,10 +426,10 @@ func cmdChannels(args []string) {
 	})
 }
 
-// cmdHistory: lesche history <target> [--room] [--since N] [--limit N]
+// cmdHistory: kopos history <target> [--room] [--since N] [--limit N]
 func cmdHistory(args []string) {
 	if len(args) < 1 {
-		fmt.Fprintln(os.Stderr, "usage: lesche history <peer|room> [--room] [--since N] [--limit N]")
+		fmt.Fprintln(os.Stderr, "usage: kopos history <peer|room> [--room] [--since N] [--limit N]")
 		os.Exit(1)
 	}
 	from := mustCaller(args)
@@ -464,7 +464,7 @@ func cmdHistory(args []string) {
 // caller's git environment unless --project is specified explicitly.
 func cmdPlan(args []string) {
 	if len(args) < 1 {
-		fmt.Fprintln(os.Stderr, "usage: lesche plan <create|assign|unassign|status|claim|show|list|handoff>")
+		fmt.Fprintln(os.Stderr, "usage: kopos plan <create|assign|unassign|status|claim|show|list|handoff>")
 		os.Exit(1)
 	}
 	sub := args[0]
@@ -483,7 +483,7 @@ func cmdPlan(args []string) {
 	switch sub {
 	case "create":
 		if len(rest) < 1 || rest[0] == "" || rest[0][0] == '-' {
-			fmt.Fprintln(os.Stderr, "usage: lesche plan create <slug> [--goal <text>] [--project <id>]")
+			fmt.Fprintln(os.Stderr, "usage: kopos plan create <slug> [--goal <text>] [--project <id>]")
 			os.Exit(1)
 		}
 		slug := rest[0]
@@ -498,7 +498,7 @@ func cmdPlan(args []string) {
 
 	case "assign":
 		if len(rest) < 2 {
-			fmt.Fprintln(os.Stderr, "usage: lesche plan assign <slug> <agent> --worktree <path> [--goal <text>] [--kickoff <text>] [--project <id>]")
+			fmt.Fprintln(os.Stderr, "usage: kopos plan assign <slug> <agent> --worktree <path> [--goal <text>] [--kickoff <text>] [--project <id>]")
 			os.Exit(1)
 		}
 		slug, owner := rest[0], rest[1]
@@ -516,7 +516,7 @@ func cmdPlan(args []string) {
 
 	case "unassign":
 		if len(rest) < 1 || rest[0] == "" || rest[0][0] == '-' {
-			fmt.Fprintln(os.Stderr, "usage: lesche plan unassign <slug> [--project <id>]")
+			fmt.Fprintln(os.Stderr, "usage: kopos plan unassign <slug> [--project <id>]")
 			os.Exit(1)
 		}
 		slug := rest[0]
@@ -530,7 +530,7 @@ func cmdPlan(args []string) {
 
 	case "status":
 		if len(rest) < 2 {
-			fmt.Fprintln(os.Stderr, "usage: lesche plan status <slug> <in-progress|ready|blocked|merged> [--project <id>]")
+			fmt.Fprintln(os.Stderr, "usage: kopos plan status <slug> <in-progress|ready|blocked|merged> [--project <id>]")
 			os.Exit(1)
 		}
 		slug, status := rest[0], rest[1]
@@ -544,7 +544,7 @@ func cmdPlan(args []string) {
 
 	case "claim":
 		if len(rest) < 1 || rest[0] == "" || rest[0][0] == '-' {
-			fmt.Fprintln(os.Stderr, "usage: lesche plan claim <slug> [--worktree <path>] [--project <id>]")
+			fmt.Fprintln(os.Stderr, "usage: kopos plan claim <slug> [--worktree <path>] [--project <id>]")
 			os.Exit(1)
 		}
 		slug := rest[0]
@@ -591,7 +591,7 @@ func cmdPlan(args []string) {
 
 	case "handoff":
 		if len(rest) < 1 || rest[0] == "" || rest[0][0] == '-' {
-			fmt.Fprintln(os.Stderr, "usage: lesche plan handoff <new-supervisor> [--project <id>]")
+			fmt.Fprintln(os.Stderr, "usage: kopos plan handoff <new-supervisor> [--project <id>]")
 			os.Exit(1)
 		}
 		newSup := rest[0]
@@ -625,7 +625,7 @@ func cmdStop(_ []string) {
 
 func cmdInit(args []string) {
 	if len(args) != 1 {
-		fmt.Fprintln(os.Stderr, "usage: lesche init <worker|supervisor>")
+		fmt.Fprintln(os.Stderr, "usage: kopos init <worker|supervisor>")
 		os.Exit(1)
 	}
 	prompt, err := promptForRole(args[0])
@@ -638,7 +638,7 @@ func cmdInit(args []string) {
 
 func cmdPrompt(args []string) {
 	if len(args) < 1 {
-		fmt.Fprintln(os.Stderr, "usage: lesche prompt <worker|supervisor> [--force]")
+		fmt.Fprintln(os.Stderr, "usage: kopos prompt <worker|supervisor> [--force]")
 		os.Exit(1)
 	}
 	role := args[0]
@@ -655,7 +655,7 @@ func cmdPrompt(args []string) {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
-	path := filepath.Join(cwd, "LESCHE.md")
+	path := filepath.Join(cwd, "KOPOS.md")
 	if err := writeManagedPromptFile(path, prompt, force); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
@@ -665,7 +665,7 @@ func cmdPrompt(args []string) {
 
 func cmdRun(args []string) {
 	if len(args) < 2 {
-		fmt.Fprintln(os.Stderr, "usage: lesche run <worker|supervisor> --claude-code|--codex|--copilot [--force] [args...]")
+		fmt.Fprintln(os.Stderr, "usage: kopos run <worker|supervisor> --claude-code|--codex|--copilot [--force] [args...]")
 		os.Exit(1)
 	}
 

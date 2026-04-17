@@ -259,7 +259,7 @@ func TestHistoryChannelPeerOnly(t *testing.T) {
 // TestStateSweepExpiresAgentAndReleasesWaiter: an agent whose lease expires
 // has its hanging read released immediately so its client returns.
 func TestStateSweepExpiresAgentAndReleasesWaiter(t *testing.T) {
-	t.Setenv("LESCHE_WORKSPACE", filepath.Join(t.TempDir(), "workspace"))
+	t.Setenv("KOPOS_WORKSPACE", filepath.Join(t.TempDir(), "workspace"))
 	s := newFixtureState()
 	now := time.Now()
 
@@ -307,8 +307,8 @@ func TestStateSweepExpiresAgentAndReleasesWaiter(t *testing.T) {
 // releases their hanging channel read with peer_closed, and evicts them
 // from rooms.
 func TestOpUnregisterReleasesWaitersAndEvicts(t *testing.T) {
-	t.Setenv("LESCHE_HOME", t.TempDir())
-	t.Setenv("LESCHE_WORKSPACE", filepath.Join(t.TempDir(), "workspace"))
+	t.Setenv("KOPOS_HOME", t.TempDir())
+	t.Setenv("KOPOS_WORKSPACE", filepath.Join(t.TempDir(), "workspace"))
 	s := newFixtureState()
 	mustRegister(t, s, "alice", 1)
 	mustRegister(t, s, "bob", 2)
@@ -370,7 +370,7 @@ func TestOpUnregisterReleasesWaitersAndEvicts(t *testing.T) {
 // TestStateSweepEvictsExpiredAgentsFromRooms: room membership tracks agent
 // lifetime.
 func TestStateSweepEvictsExpiredAgentsFromRooms(t *testing.T) {
-	t.Setenv("LESCHE_WORKSPACE", filepath.Join(t.TempDir(), "workspace"))
+	t.Setenv("KOPOS_WORKSPACE", filepath.Join(t.TempDir(), "workspace"))
 	s := newFixtureState()
 	now := time.Now()
 

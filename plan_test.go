@@ -128,8 +128,8 @@ func TestWorkerCanFlipOwnStatus(t *testing.T) {
 // TestSupervisorBusyBlocksUnregister verifies that a supervisor with active
 // (non-merged) assignments cannot unregister.
 func TestSupervisorBusyBlocksUnregister(t *testing.T) {
-	t.Setenv("LESCHE_HOME", t.TempDir())
-	t.Setenv("LESCHE_WORKSPACE", filepath.Join(t.TempDir(), "workspace"))
+	t.Setenv("KOPOS_HOME", t.TempDir())
+	t.Setenv("KOPOS_WORKSPACE", filepath.Join(t.TempDir(), "workspace"))
 	s := newFixtureState()
 	mustRegisterRole(t, s, "sup", "supervisor", 1)
 
@@ -206,7 +206,7 @@ func TestProjectIDDerivation(t *testing.T) {
 		{"https://github.com/org/my-repo.git", "", "my-repo"},
 		{"git@github.com:org/my-repo.git", "", "my-repo"},
 		{"https://github.com/org/My_Repo.git", "", "my-repo"},
-		{"", "lesche", "lesche"},
+		{"", "kopos", "kopos"},
 		{"", "", "default"},
 	}
 	for _, c := range cases {
@@ -221,7 +221,7 @@ func TestProjectIDDerivation(t *testing.T) {
 // reloaded by loadPlans on a fresh State (simulates daemon restart).
 func TestPlanFileRoundTrip(t *testing.T) {
 	ws := filepath.Join(t.TempDir(), "workspace")
-	t.Setenv("LESCHE_WORKSPACE", ws)
+	t.Setenv("KOPOS_WORKSPACE", ws)
 
 	original := &Plan{
 		ProjectID:  "myproject",
@@ -255,7 +255,7 @@ func TestPlanFileRoundTrip(t *testing.T) {
 // recreates an archived room stub for merged assignments (daemon restart case).
 func TestMergedAssignmentRestoresArchivedRoomOnLoad(t *testing.T) {
 	ws := filepath.Join(t.TempDir(), "workspace")
-	t.Setenv("LESCHE_WORKSPACE", ws)
+	t.Setenv("KOPOS_WORKSPACE", ws)
 
 	original := &Plan{
 		ProjectID:  "myproject",

@@ -1,4 +1,4 @@
-# Lesche — Identity model (post-MVP design)
+# Kopos — Identity model (post-MVP design)
 
 The MVP identifies agents by a single `name` string. That works for two
 agents with distinct names and breaks the moment any of the following
@@ -65,7 +65,7 @@ share a name as long as their `AgentID` differs.
 
 ### Auto-detection at register
 
-The `lesche register` command auto-populates these fields from the
+The `kopos register` command auto-populates these fields from the
 agent's environment. Resolution order for `Project`:
 
 1. Explicit `--project <name>` flag.
@@ -125,7 +125,7 @@ future `post --to`) accepts these forms, checked in order:
 
 Failing all of those, `not_found`.
 
-### `lesche agents` output
+### `kopos agents` output
 
 Shows the fully-qualified form so the user can see what to type to
 disambiguate:
@@ -148,24 +148,24 @@ having to type `claude@obolos:web` every time. The nickname is the
 ### Commands
 
 ```
-lesche nickname <nick> <address>        # assign
-lesche nickname <nick>                  # show what it resolves to, plus current status
-lesche nickname                         # list all nicknames
-lesche nickname -d <nick>               # delete
+kopos nickname <nick> <address>        # assign
+kopos nickname <nick>                  # show what it resolves to, plus current status
+kopos nickname                         # list all nicknames
+kopos nickname -d <nick>               # delete
 ```
 
 Examples:
 
 ```
-lesche nickname reviewer  claude@obolos:web
-lesche nickname scratch   claude@obolos:quant
-lesche nickname pair      codex@obolos:main
+kopos nickname reviewer  claude@obolos:web
+kopos nickname scratch   claude@obolos:quant
+kopos nickname pair      codex@obolos:main
 ```
 
 Then, in any command that takes an address:
 
 ```
-lesche tunnel reviewer
+kopos tunnel reviewer
 ```
 
 The user types `reviewer` — the daemon looks it up, resolves to an
@@ -173,7 +173,7 @@ agent_id, and opens a tunnel to the corresponding agent.
 
 ### Binding semantics — choose one at assign time
 
-**Stable binding (default)**: `lesche nickname <nick> <address>`
+**Stable binding (default)**: `kopos nickname <nick> <address>`
 resolves the address *once* at assignment time and records the
 resulting `agent_id`. The nickname stays pointed at the same agent
 even if the agent re-registers, moves projects, or changes branches.
@@ -182,17 +182,17 @@ the nickname goes stale and resolves with a clear message:
 
 ```
 nickname "reviewer" points to agent_id 01HX9Z7E3M… which is no longer
-registered. Reassign with: lesche nickname reviewer <new-address>
+registered. Reassign with: kopos nickname reviewer <new-address>
 ```
 
-**Role binding** (opt-in): `lesche nickname --follow <nick> <address>`
+**Role binding** (opt-in): `kopos nickname --follow <nick> <address>`
 stores the address string, not the agent_id. Each resolution re-runs
 the address resolver. If `claude@obolos:web` points at a different
 agent tomorrow, the nickname follows the new agent. Useful when
 nicknames mean roles (`reviewer` = whoever is on the web branch right
 now).
 
-`lesche nickname <nick>` shows the binding mode and the current
+`kopos nickname <nick>` shows the binding mode and the current
 resolution:
 
 ```
@@ -209,7 +209,7 @@ ops-bot → claude@obolos:main (follows)
 
 ### Storage
 
-`~/.lesche/nicknames.json`:
+`~/.kopos/nicknames.json`:
 
 ```json
 {
@@ -235,9 +235,9 @@ The current in-memory/file registry uses `name` as the key. Migration:
    in-flight tunnels referenced by name continue to resolve.
 3. Change lookup functions to accept the resolution grammar in section
    "Address resolution."
-4. Update `lesche agents` output to show fully qualified form.
-5. Add `lesche nickname` subcommand.
-6. Update `lesche protocol` to document the new addressing rules.
+4. Update `kopos agents` output to show fully qualified form.
+5. Add `kopos nickname` subcommand.
+6. Update `kopos protocol` to document the new addressing rules.
 
 No protocol-level breaking change for agents that only use their own
 name. The old behavior ("tunnel codex" works if codex is unique) is

@@ -11,7 +11,7 @@ import (
 )
 
 // keychainKeystore delegates to the macOS 'security' CLI.  Keys are stored
-// as generic passwords: service=lesche, account=<agent name>, password=<hex>.
+// as generic passwords: service=kopos, account=<agent name>, password=<hex>.
 type keychainKeystore struct{}
 
 // newKeychainBackend returns a keychainKeystore if the 'security' binary is

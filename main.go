@@ -78,7 +78,7 @@ func main() {
 }
 
 func usage() {
-	fmt.Fprintf(os.Stderr, `lesche - agent-to-agent coordination
+	fmt.Fprintf(os.Stderr, `kopos - agent-to-agent coordination
 
 Peer-to-peer (English intent → command):
   tell X       = one-way notification / "notify, publish, inform"
@@ -93,58 +93,58 @@ Rooms (N-party):
   peek R --room = inspect room mailbox
 
 Usage:
-  lesche init <worker|supervisor>       print role bootstrap prompt to stdout
-  lesche prompt <worker|supervisor> [--force]
-                                        write ./LESCHE.md bootstrap prompt
-  lesche run <worker|supervisor> --claude-code [args...]
-  lesche run <worker|supervisor> --codex       [args...]
-  lesche run <worker|supervisor> --copilot     [--force] [args...]
+  kopos init <worker|supervisor>       print role bootstrap prompt to stdout
+  kopos prompt <worker|supervisor> [--force]
+                                        write ./KOPOS.md bootstrap prompt
+  kopos run <worker|supervisor> --claude-code [args...]
+  kopos run <worker|supervisor> --codex       [args...]
+  kopos run <worker|supervisor> --copilot     [--force] [args...]
 
-  lesche register [--name <name>] [--harness H] [--model M] [--project P] [--role supervisor|worker]
-  lesche unregister                      drop yourself from the registry
-  lesche agents
-  lesche channels                        list your peer-pair channels
-  lesche nickname [<nick> [<address>]] [-d <nick>] [--follow]
+  kopos register [--name <name>] [--harness H] [--model M] [--project P] [--role supervisor|worker]
+  kopos unregister                      drop yourself from the registry
+  kopos agents
+  kopos channels                        list your peer-pair channels
+  kopos nickname [<nick> [<address>]] [-d <nick>] [--follow]
 
-  lesche tell <peer> "<msg>"             async, no reply expected
-  lesche ask  <peer> "<msg>" [--timeout N]   send then block for reply
-  lesche read <peer|room> [--room] [--timeout N]   consume next inbound
-  lesche peek <peer|room> [--room]       non-destructive inspect
-  lesche read-any [--timeout N]          block on ANY channel or room
+  kopos tell <peer> "<msg>"             async, no reply expected
+  kopos ask  <peer> "<msg>" [--timeout N]   send then block for reply
+  kopos read <peer|room> [--room] [--timeout N]   consume next inbound
+  kopos peek <peer|room> [--room]       non-destructive inspect
+  kopos read-any [--timeout N]          block on ANY channel or room
 
-  lesche rooms                           list known rooms
-  lesche room create <name> [--desc <text>]
-  lesche join <room>
-  lesche leave <room>
-  lesche participants <room>
-  lesche post <room> "<msg>"             async broadcast
+  kopos rooms                           list known rooms
+  kopos room create <name> [--desc <text>]
+  kopos join <room>
+  kopos leave <room>
+  kopos participants <room>
+  kopos post <room> "<msg>"             async broadcast
 
-  lesche history <peer|room> [--room] [--since SEQ] [--limit N]
-  lesche renew                           extend caller's lease
-  lesche stop
+  kopos history <peer|room> [--room] [--since SEQ] [--limit N]
+  kopos renew                           extend caller's lease
+  kopos stop
 
 Plan (supervisor/worker roles):
-  lesche plan create <slug> [--goal <text>] [--project <id>]
-  lesche plan assign <slug> <agent> --worktree <path> [--goal <text>] [--kickoff <text>] [--project <id>]
-  lesche plan unassign <slug> [--project <id>]
-  lesche plan status <slug> <in-progress|ready|blocked|merged> [--project <id>]
-  lesche plan claim <slug> [--worktree <path>] [--project <id>]
-  lesche plan show [--project <id>]
-  lesche plan list
-  lesche plan handoff <new-supervisor> [--project <id>]
-  lesche protocol                        print agent-facing protocol guide
-  lesche --version
+  kopos plan create <slug> [--goal <text>] [--project <id>]
+  kopos plan assign <slug> <agent> --worktree <path> [--goal <text>] [--kickoff <text>] [--project <id>]
+  kopos plan unassign <slug> [--project <id>]
+  kopos plan status <slug> <in-progress|ready|blocked|merged> [--project <id>]
+  kopos plan claim <slug> [--worktree <path>] [--project <id>]
+  kopos plan show [--project <id>]
+  kopos plan list
+  kopos plan handoff <new-supervisor> [--project <id>]
+  kopos protocol                        print agent-facing protocol guide
+  kopos --version
 
 Prompt/run safety:
   Overwrite is refused when an existing instructions file does not carry
-  a lesche marker. Pass --force to override where supported.
+  a kopos marker. Pass --force to override where supported.
 
 Identity:
-  On register, lesche generates an Ed25519 keypair for your name and assigns
+  On register, kopos generates an Ed25519 keypair for your name and assigns
   a stable ULID agent_id. The agent_id persists across re-registrations as
   long as the keypair file is intact. Rich metadata (project, branch, harness,
   model) is auto-detected from git and the caller's environment.
-  Public key lives in the registry; private key at ~/.lesche/keys/<name>.key
+  Public key lives in the registry; private key at ~/.kopos/keys/<name>.key
   (mode 0600). Every authenticated request is signed by your key and
   verified by the daemon. Another process passing --as <your-name> without
   your key will be rejected with exit code 6.
@@ -156,17 +156,17 @@ Identity:
     name@project:branch     fully-qualified, branch scoped
     name                    bare name (error if ambiguous)
 
-  Nicknames (stored at ~/.lesche/nicknames.json):
-    lesche nickname <nick> <address>        assign (stable by default)
-    lesche nickname --follow <nick> <addr>  assign (follows address re-resolution)
-    lesche nickname <nick>                  show current resolution
-    lesche nickname                         list all
-    lesche nickname -d <nick>              delete
+  Nicknames (stored at ~/.kopos/nicknames.json):
+    kopos nickname <nick> <address>        assign (stable by default)
+    kopos nickname --follow <nick> <addr>  assign (follows address re-resolution)
+    kopos nickname <nick>                  show current resolution
+    kopos nickname                         list all
+    kopos nickname -d <nick>              delete
 
 Environment:
-  LESCHE_NAME       caller identity for all commands (override per-call with --as)
-  LESCHE_HOME       socket/pid/keys dir (default ~/.lesche)
-  LESCHE_WORKSPACE  git repo for transcripts (default ~/.local/state/lesche/workspace)
+  KOPOS_NAME       caller identity for all commands (override per-call with --as)
+  KOPOS_HOME       socket/pid/keys dir (default ~/.kopos)
+  KOPOS_WORKSPACE  git repo for transcripts (default ~/.local/state/kopos/workspace)
 
 Exit codes:
   0  ok
@@ -177,6 +177,6 @@ Exit codes:
   5  not_found — peer or room does not exist
   6  unauthorized — signature invalid or caller not registered
 
-Run "lesche protocol" for the full agent-facing guide.
+Run "kopos protocol" for the full agent-facing guide.
 `)
 }

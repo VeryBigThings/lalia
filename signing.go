@@ -21,7 +21,7 @@ func keyPath(name string) string {
 }
 
 // ensureKey returns an existing key or generates a new one, using the active
-// keystore backend (file by default; keychain when LESCHE_KEYSTORE=keychain).
+// keystore backend (file by default; keychain when KOPOS_KEYSTORE=keychain).
 func ensureKey(name string) (ed25519.PublicKey, ed25519.PrivateKey, error) {
 	ks := newKeystore()
 	priv, err := ks.Load(name)
