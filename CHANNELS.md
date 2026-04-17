@@ -1,5 +1,12 @@
 # Channels — Messaging Redesign
 
+**STATUS: shipped at `9d192bf`.** Kept in the repo as historical context
+for why the surface looks the way it does. Current behavior is
+authoritative in `help.go` / `lesche protocol`.
+
+---
+
+
 A plan to replace the current tunnel/room split and turn-enforced
 two-party channel with a unified channels model: one mailbox per
 peer-pair, one mailbox per room, four verbs, no turn FSM, no sids

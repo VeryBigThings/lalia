@@ -35,21 +35,26 @@ files on top of this.
    "Current assignments", "Parallelization principles", "File-
    ownership heat map", "Rules of engagement", and the scope entry
    for your specific workstream.
-2. **`ARCHITECTURE.md`** — how the pieces fit. Daemon/client/tunnel/
-   writer/registry model.
+2. **`ARCHITECTURE.md`** — how the pieces fit. Daemon/client/channel/
+   room/writer/registry model.
 3. **`IDEA.md`** — why lesche exists. Short.
-4. **`MVP.md`** — what is shipping and what isn't. Rooms and queue
-   are now merged; some of this doc is retrospective.
-5. **`protocol.go`** — wire-level request/response shapes. **Do
-   not edit struct shapes** — workstream F (structured errors) owns
-   that refactor and is sequenced last. Additive fields only.
-6. **`help.go`** and run `./lesche protocol` — the agent-facing
+4. **`MVP.md`** — what is shipping and what isn't. Large parts are
+   retrospective now that channels / rooms / queue have landed.
+5. **`CHANNELS.md`** — the messaging redesign (shipped). Read if you
+   are confused about why there is no `tunnel` / `send` / `await`
+   / `sid` anywhere.
+6. **`protocol.go`** — wire-level request/response shapes. Currently
+   safe to extend additively; workstream F (structured errors) is
+   the only task allowed to rework the `Response` shape.
+7. **`help.go`** and run `./lesche protocol` — the agent-facing
    protocol guide. If your workstream adds a user-visible command,
    you update both.
-7. **`state.go`** — the dispatch switch is the entry point for
+8. **`state.go`** — the dispatch switch is the entry point for
    every op. You will almost certainly add a case here.
-8. Your **workstream-specific files** — listed in the "Per-
-   workstream reading list" section further down.
+9. **`channel.go`** — peer-to-peer primitive. Tell / read / peek
+   semantics.
+10. Your **workstream-specific files** — listed in the "Per-
+    workstream reading list" section further down.
 
 After reading: identify **which files your workstream is going to
 touch**, cross-check them against the heat map, and if you see
@@ -189,41 +194,57 @@ yourself per step 3.
 All agents coordinate through lesche itself. Full protocol guide:
 run `./lesche protocol`. Full help: `./lesche help`.
 
-## Current state (snapshot at commit e4e7186)
+## Current state (snapshot at commit 9d192bf)
 
 **Shipped on main:**
-- Tunnel transport (2-party sync, turn FSM, git-backed transcript).
-- Registry with persisted JSON, lease + renew, session discovery,
-  history read via daemon, workspace moved outside harness allowlists.
+- Peer-to-peer channels (one per unordered pair; no turn FSM, no sid
+  in CLI; `tell`/`ask`/`read`/`peek`/`read-any`). Git transcripts
+  under `peers/<lo>--<hi>/`. Merged at `9d192bf`.
+- Room mode (N-party pub/sub, bounded per-subscriber mailbox with
+  overflow notice, commands `rooms`, `room_create`, `join`, `leave`,
+  `participants`, `post`, plus unified `read` / `peek` with `--room`).
+  Room `read` drains all pending (blocks up to timeout for the first
+  arrival). Merged at `e4e7186`, adjusted in channels redesign.
+- SQLite write queue (crash-safe message persistence, WAL mode,
+  dead-letter after 3 failed commits). Merged at `d113b02`.
+- Registry with persisted JSON, 30-minute lease + renew, workspace at
+  `~/.local/state/lesche/workspace` (outside harness allowlists).
 - Ed25519 signed requests for every authenticated op.
 - Install pipeline: `make install` places binary on `$PATH`.
 - Protocol help (`lesche protocol`) and short help (`lesche help`)
   current for everything shipped.
-- Room mode (N-party pub/sub, bounded per-subscriber mailbox with
-  overflow notice, commands `rooms`, `room_create`, `join`, `leave`,
-  `participants`, `post`, `inbox`, `peek`). Merged at `e4e7186`.
-- SQLite write queue (crash-safe message persistence, WAL mode,
-  dead-letter after 3 failed commits). Merged at `d113b02`.
-- Test suite now 22 tests via `make test`, ~5.5s runtime.
+- Test suite: 32 tests via `make test`, ~2.2s runtime.
 
 **Active branches (not on main):**
 - `feat/identity` — reassigned to Copilot (see below). Head still at
-  `a907186`; not started.
+  `a907186`; not started. Needs rebase on new main before work begins.
 
 **Designed, not implemented:**
-- Resumable blocking, structured error payloads, keychain integration,
-  multi-project workspace isolation, cross-machine sync.
+- Structured error payloads (workstream F), keychain integration
+  (workstream E), multi-project workspace isolation, cross-machine
+  sync.
+
+**Killed:**
+- Resumable blocking (workstream D). The turn FSM is gone, so there
+  is no waiter state to "resume" after timeout — `read` returns empty
+  and the caller calls `read` again. No command needed.
 
 ## Current assignments
 
-Second batch after the rooms + write-queue merges. Three-agent parallel
-again; collisions are small (see heat map further down).
+Post-channels batch. Workstream D killed by the channels redesign, so
+re-slot `claude-code` onto something else.
 
 | Agent | Branch | Workstream | Worktree path | Status |
 |-------|--------|------------|---------------|--------|
 | `copilot` | `feat/identity` | A. Identity refactor + nicknames | `~/Obolos/lesche-identity` | Assigned. Worktree exists at head `a907186`; rebase on main before starting. |
-| `claude-code` | `feat/resumable` | D. Resumable blocking | `~/Obolos/lesche-resumable` | Assigned. Create worktree + branch from current main. |
+| `claude-code` | `feat/errors` | F. Structured error payloads | `~/Obolos/lesche-errors` | Assigned. Solo workstream — touches `protocol.go` heavy and every handler. Must not run concurrently with any other. |
 | `codex` | `feat/keychain` | E. Keychain integration | `~/Obolos/lesche-keychain` | Assigned. Create worktree + branch from current main. Self-contained; no protocol change. |
+
+Sequencing note: F (structured errors) was originally gated behind
+A + E. Given `claude-code` needs an A-tier task and there is no other
+available, we break the sequencing and run F in parallel with E. A
+(identity) has no overlap with F. E (keychain) has no overlap with F.
+A and F both touch `state.go` dispatch lightly; last-to-merge rebases.
 
 All three agents start cold this batch. Read the "Cold-start reading
 list" section above plus your workstream's extras from "Per-workstream
@@ -232,24 +253,13 @@ reading list" below before writing any code.
 Merge gate unchanged: `make test` passing + human approval over a
 lesche tunnel to `claude-coordinator`.
 
-### Spot patch to bundle with whichever lands first
+### Settled in prior batches
 
-**Lease TTL.** 10 minutes is too short; all three agents dropped during
-the first-batch merge window. Raise `leaseTTL` in `state.go` to 30 or
-60 minutes and renew lease on `agents` (currently skipped). ~10 lines
-in `state.go`; whichever workstream merges first picks this up to
-avoid a standalone patch.
-
-### Incoming: workstream G (Channels redesign)
-
-See `CHANNELS.md` for the full plan. Summary: drop the turn FSM,
-rename `send`/`await` to `tell`/`read`, add `ask` helper, collapse
-multi-session sids to one channel per peer-pair. This kills
-workstream D (resumable blocking) — without the FSM there is no
-waiter state to resume. Sequenced after the current batch (A/E)
-lands; probably before or around F (structured errors). Single
-agent, single branch. **Claude Code's `feat/resumable` assignment
-above is on pause until this plan is accepted or rejected.**
+- Lease TTL raised to 30 minutes (was 10). Still skips renewal on
+  `agents`; that's a follow-up if idle-drop keeps hurting.
+- Channels redesign shipped (workstream G). See `CHANNELS.md` for
+  the plan document, kept as historical context. Current behavior is
+  documented in `help.go` and `lesche protocol`.
 
 ### Per-workstream reading list
 
@@ -274,20 +284,33 @@ Read this after the cold-start list above, before writing code.
    workspace; alternative is in the git-backed workspace for audit.
    Raise this in your kickoff tunnel to `claude-coordinator`.
 
-**D. Resumable blocking (`claude-code`, `feat/resumable`)**
+**F. Structured error payloads (`claude-code`, `feat/errors`)**
 
-1. `tunnel.go` — the turn FSM, mailbox, send/await semantics. This
-   is the file you will spend the most time in.
-2. `state.go` — dispatch switch (you will add a `resume` case) and
-   the any-waiter mechanism. Study how `opAwait` currently behaves
-   on timeout — it drops the waiter. Your job is to keep the tunnel
-   state intact so a client can re-block.
-3. `client.go` — how existing commands are wired client-side
-   (`lesche send`, `lesche await`). Add `lesche resume` in the same
-   style.
-4. `main.go` and `help.go` — short; pattern-match the additions.
-5. `tunnel_test.go` and `daemon_integration_test.go` — the test
-   style you must match. Timeout-then-resume is the core new test.
+Killed workstream D is replaced with F. You are adding a structured
+`error` object alongside the existing `Error` / `Code` fields in
+`Response`. Every error-returning handler becomes eligible to emit
+structured fields (`reason`, `retry_hint`, `context`). Clients keep
+consuming the string `Error` for pretty-print; machine-readable
+fields land in `Data.error`.
+
+1. `protocol.go` — `Response` struct. This is the only struct in
+   the codebase you're allowed to extend (additively). Do not rename
+   or remove existing fields.
+2. `state.go` — every `Response{Error: "...", Code: ...}` site.
+   Most are one-liners; your job is to wrap them in a helper that
+   also populates a structured `error` object.
+3. `room.go`, `channel.go` — same pattern, fewer sites.
+4. `client.go` — `handle()` currently prints `resp.Error` to stderr
+   and exits with `resp.Code`. Add pretty-print of `resp.Data.error`
+   when present (retry-hint, context fields).
+5. `state_test.go`, `daemon_integration_test.go`, `signing_test.go`,
+   `room_test.go` — existing tests assert on `resp.Error` and
+   `resp.Code`. Add new assertions that structured fields populate
+   correctly for representative errors.
+
+Must-run-solo: F touches every error path. If you try to run
+concurrently with A or E you will have merge conflicts in
+`state.go` and possibly `room.go`. Coordinate with their timelines.
 
 **E. Keychain integration (`codex`, `feat/keychain`)**
 
@@ -356,34 +379,40 @@ approval over a lesche tunnel to `claude`.
 
 ## File-ownership heat map
 
-| File            | Identity | Rooms | SQLite queue | Resumable | Keychain | Struct errors |
-|-----------------|:-:|:-:|:-:|:-:|:-:|:-:|
-| state.go        | H | M |  |  |  | M |
-| tunnel.go       |  |  |  | M |  | M |
-| registry.go     | H |  |  |  |  |  |
-| signing.go      |  |  |  |  | H |  |
-| writer.go       |  | L | H |  |  |  |
-| daemon.go       |  |  | M |  |  |  |
-| client.go       | M | M |  | L |  | M |
-| protocol.go     | L | L |  |  |  | **H** |
-| main.go         | L | L |  | L |  | L |
-| help.go         | L | L |  | L | L | L |
-| util.go         | L |  |  |  |  |  |
-| new files       | nickname.go, identity.go | room.go | queue.go |  |  |  |
+Only the three currently-active workstreams (A, E, F) are in the
+table. Rooms, SQLite queue, and channels are all merged.
 
-H = heavy edits likely. M = moderate. L = small additive changes.
-A cell marked H in two columns means those workstreams cannot run
-concurrently without collision.
+| File            | A. Identity | E. Keychain | F. Struct errors |
+|-----------------|:-:|:-:|:-:|
+| state.go        | H |  | M |
+| channel.go      |  |  | L |
+| room.go         |  |  | L |
+| registry.go     | H |  |  |
+| signing.go      |  | H |  |
+| queue.go        |  |  | L |
+| writer.go       |  |  | L |
+| daemon.go       |  |  |  |
+| client.go       | M |  | M |
+| protocol.go     | L |  | **H** |
+| main.go         | L |  | L |
+| help.go         | L | L | L |
+| util.go         | L |  |  |
+| new files       | nickname.go, identity.go |  keystore.go |  |
+
+H = heavy. M = moderate. L = small additive.
 
 ### Read the collisions
 
-- **Identity ↔ Rooms**: both touch `state.go` moderately. Manageable
-  if rooms v1 uses the current bare-name addressing and upgrades to
-  rich addressing *after* identity lands.
-- **Rooms ↔ SQLite queue**: both touch `writer.go`. Light collision —
-  rooms only adds new write paths, queue only wraps existing writes.
-- **Structured errors ↔ everything**: hits `protocol.go` heavy and
-  every error-returning handler. Must be done solo or sequenced last.
+- **A ↔ F**: both touch `state.go`. A is heavy on registry.go and
+  dispatch; F is moderate on every handler's error path. The
+  `state.go` dispatch switch is shared — last-to-merge rebases.
+- **E ↔ F**: none. E is confined to `signing.go` and a new
+  `keystore.go`.
+- **A ↔ E**: none.
+
+The turn-FSM / tunnel era file `tunnel.go` no longer exists; its
+role is covered by `channel.go`. Any older heat-map entry referring
+to `tunnel.go` is stale and should be read as `channel.go`.
   Do **not** run in the same batch as any other feature.
 
 ## Workstream catalog
@@ -418,87 +447,10 @@ rooms if you want rooms to benefit from rich addressing at merge time.
 **Agent fit**: Highest context requirement. Whoever owns this should
 already have full lesche internals loaded.
 
-### B. Room mode (N-party pub/sub)
-
-**Goal**: Implement async rooms per the phase-1 spec in `MVP.md`. Max
-8 members, per-sender FIFO, per-subscriber bounded mailbox, explicit
-join/leave.
-
-**Scope**: New transport alongside tunnels. Commands: `rooms`, `room
-create`, `join`, `leave`, `post`, `inbox`, `peek`, `participants`.
-Room messages commit under `rooms/<name>/` in the workspace.
-
-**Files**: new `room.go` (primary), `state.go` (add rooms map +
-dispatch), `client.go` (new commands), `writer.go` (new write paths),
-`help.go` (usage + protocol).
-
-**Tests**: join/leave changes membership; post broadcasts to all
-members' mailboxes except sender; slow subscriber does not block
-senders; mailbox overflow drops oldest with notice; peer-only reads
-via `peek`/`inbox` mirror the history-peer-check pattern from
-tunnels.
-
-**Blockers**: None if v1 uses bare-name addressing. If identity
-lands first, rebase to use the resolver. Concurrent with identity is
-fine; just accept a post-merge rebase on addressing sites.
-
-**Agent fit**: Medium context. Whoever does this should understand
-the existing `tunnel.go` patterns for mailboxes and waiters — rooms
-reuse the same primitives generalized to N peers.
-
-### C. SQLite write queue
-
-**Goal**: Persist messages between client ack and git commit so a
-daemon crash cannot lose acknowledged but uncommitted messages.
-
-**Scope**: Add `~/.lesche/queue.db` (SQLite, WAL). Client ack happens
-on queue insert. Writer goroutine drains the queue, commits to git,
-deletes from queue. On daemon startup, any rows in the queue replay
-through the writer.
-
-**Files**: new `queue.go`, `writer.go` (wrap writes in queue
-insert + drain), `daemon.go` (startup replay).
-
-**Tests**: ack happens before git commit; simulated crash (kill
-mid-commit) and restart replays the queue; queue entries clear after
-successful commit; schema migration smoke test.
-
-**Blockers**: None. Zero surface change. Fully parallel-safe with
-everything except structured errors.
-
-**Agent fit**: Self-contained. A new agent with no lesche history
-could pick this up reading `writer.go` and `ARCHITECTURE.md`. Best
-workstream for Copilot or any fresh agent.
-
-**Dependency**: requires the SQLite stdlib or a pure-Go driver
-(`modernc.org/sqlite` is pure-Go; `mattn/go-sqlite3` needs cgo).
-Agent should pick pure-Go to keep the static-binary story intact.
-
-### D. Resumable blocking
-
-**Goal**: `lesche resume <sid>` re-enters a blocked wait on a tunnel
-after a timeout, instead of losing turn state and forcing the caller
-to reason about it.
-
-**Scope**: On `send`/`await` timeout, the daemon keeps the tunnel
-state and the caller's pending-reply expectation intact. The client
-can call `resume` with the same sid to block again for the same
-waited-for message. Idempotent in the sense that calling `resume`
-twice doesn't double-register.
-
-**Files**: `tunnel.go` (persist waiter state across timeouts),
-`client.go` (new `resume` command), `state.go` (dispatch), `main.go`
-and `help.go` (usage + protocol).
-
-**Tests**: timeout returns exit 2 with tunnel state preserved;
-`resume` on the same sid blocks and returns the peer's message when
-it arrives; `resume` without a pending wait returns a clear error.
-
-**Blockers**: None. Small collision with other tunnel.go changes,
-but unlikely unless run with identity or rooms.
-
-**Agent fit**: Medium. Requires understanding of the turn FSM and
-mailbox mechanism in `tunnel.go`.
+### ~~B. Room mode~~ — shipped at `e4e7186`.
+### ~~C. SQLite write queue~~ — shipped at `d113b02`.
+### ~~D. Resumable blocking~~ — killed by channels redesign (no FSM, no waiter state to resume).
+### ~~G. Channels redesign~~ — shipped at `9d192bf`. See `CHANNELS.md`.
 
 ### E. Keychain integration
 
@@ -532,24 +484,25 @@ machine-readable fields (`code`, `reason`, `retry_hint`, context).
 exit codes for shell-script compatibility.
 
 **Files**: `protocol.go` (heavy), every handler that returns an
-error (state.go, tunnel.go), `client.go` (pretty-print structured
-errors), `help.go` (document new fields).
+error (state.go, channel.go, room.go), `client.go` (pretty-print
+structured errors), `help.go` (document new fields).
 
 **Tests**: every existing error path emits a structured payload;
 clients parse payloads; backward-compat: old-style string errors in
 `.Error` still populated for readability.
 
-**Blockers**: **Run solo.** Touches every error-returning function
-across the codebase. Collides with identity, rooms, resumable, and
-any other workstream that edits handlers.
+**Blockers**: Small collision with A (identity) on `state.go`
+dispatch. Run sequentially or accept a last-to-merge rebase. No
+collision with E (keychain).
 
-**Agent fit**: Deep context. Touches the edit surface of everything.
-Schedule after the next parallel batch lands.
+**Agent fit**: Deep context. Touches the edit surface of most
+handlers.
 
 ## Sequencing after the current batch
 
-Resumable blocking (D) and keychain (E) can be slotted in once A, B, C
-land. Structured errors (F) waits until everything else is in.
+After A, E, F all land, the next-up work is multi-project workspace
+isolation and cross-machine sync. Neither has a written design yet;
+when starting that batch, write a short design doc first.
 
 ## Rules of engagement
 
@@ -561,8 +514,9 @@ land. Structured errors (F) waits until everything else is in.
    does not disturb the shared production daemon at `~/.lesche/sock`.
 3. **Tests must pass before you report done.** Run `make test`. If it
    fails, do not report done.
-4. **Do not edit `protocol.go` types** during this batch. They are
-   locked for structured-errors to handle later.
+4. **`protocol.go` struct shapes are owned by workstream F** this
+   batch. If you are not F, add fields additively only. F is allowed
+   to rework `Response`.
 5. **If you need to touch a file outside your heat-map column**, stop
    and announce in a tunnel to `claude`. Collision is possible; get
    alignment before writing.
