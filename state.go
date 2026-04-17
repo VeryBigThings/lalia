@@ -7,12 +7,20 @@ import (
 )
 
 type Agent struct {
-	Name       string    `json:"name"`
+	AgentID    string    `json:"agent_id"`              // ULID, stable for the life of the keypair
+	Name       string    `json:"name"`                  // display name, not unique
+	Pubkey     string    `json:"pubkey"`                // hex-encoded Ed25519 public key
+	Harness    string    `json:"harness,omitempty"`     // claude-code | codex | cursor | …
+	Model      string    `json:"model,omitempty"`       // e.g. claude-opus-4-7
+	Project    string    `json:"project,omitempty"`     // resolved from git remote or cwd
+	RepoURL    string    `json:"repo_url,omitempty"`    // full remote URL when available
+	Worktree   string    `json:"worktree,omitempty"`    // basename of cwd
+	Branch     string    `json:"branch,omitempty"`      // git rev-parse --abbrev-ref HEAD
+	CWD        string    `json:"cwd,omitempty"`         // full path the agent is running from
 	PID        int       `json:"pid"`
 	StartedAt  time.Time `json:"started_at"`
 	LastSeenAt time.Time `json:"last_seen_at"`
 	ExpiresAt  time.Time `json:"expires_at"`
-	Pubkey     string    `json:"pubkey"` // hex-encoded Ed25519 public key
 }
 
 // Lease duration. Any command from the agent renews; sweeper drops expired.
@@ -21,11 +29,12 @@ const sweepInterval = 30 * time.Second
 
 type State struct {
 	mu       sync.Mutex
-	agents   map[string]*Agent
+	agents   map[string]*Agent  // keyed by agent_id (ULID)
+	nameIdx  map[string]string  // name → agent_id (multiple IDs per name possible)
 	channels map[string]*Channel
 	rooms    map[string]*Room
 
-	// state-level any-waiters: one per agent, 1-buffered
+	// state-level any-waiters: one per agent_id, 1-buffered
 	anyWaiter map[string]chan anyMsg
 
 	writes chan writeOp
@@ -43,6 +52,7 @@ type anyMsg struct {
 func newState() (*State, error) {
 	s := &State{
 		agents:    make(map[string]*Agent),
+		nameIdx:   make(map[string]string),
 		channels:  make(map[string]*Channel),
 		rooms:     make(map[string]*Room),
 		anyWaiter: make(map[string]chan anyMsg),
@@ -64,15 +74,15 @@ func newState() (*State, error) {
 }
 
 // renewLease extends the lease on an agent and updates last-seen.
-// Called on every request that carries a "from" identity.
+// Called on every request that carries a "from" identity (name).
 // Writes the updated record back to the workspace asynchronously.
 func (s *State) renewLease(name string) {
 	if name == "" {
 		return
 	}
 	s.mu.Lock()
-	a, ok := s.agents[name]
-	if !ok {
+	a := s.agentByName(name)
+	if a == nil {
 		s.mu.Unlock()
 		return
 	}
@@ -82,6 +92,16 @@ func (s *State) renewLease(name string) {
 	snapshot := *a
 	s.mu.Unlock()
 	s.persistAgent(&snapshot)
+}
+
+// agentByName looks up an agent by display name via the nameIdx.
+// Must be called with s.mu held. Returns nil if not found.
+func (s *State) agentByName(name string) *Agent {
+	id, ok := s.nameIdx[name]
+	if !ok {
+		return nil
+	}
+	return s.agents[id]
 }
 
 // startSweeper runs a goroutine that drops expired agents and releases
@@ -106,13 +126,15 @@ func (s *State) startSweeper() {
 func (s *State) sweep() {
 	now := time.Now()
 	s.mu.Lock()
-	var expired []string
-	for name, a := range s.agents {
+	var expiredIDs []string
+	var expiredNames []string
+	for id, a := range s.agents {
 		if now.After(a.ExpiresAt) {
-			expired = append(expired, name)
+			expiredIDs = append(expiredIDs, id)
+			expiredNames = append(expiredNames, a.Name)
 		}
 	}
-	if len(expired) == 0 {
+	if len(expiredIDs) == 0 {
 		s.mu.Unlock()
 		return
 	}
@@ -124,29 +146,29 @@ func (s *State) sweep() {
 	for _, r := range s.rooms {
 		rooms = append(rooms, r)
 	}
-	for _, name := range expired {
-		delete(s.agents, name)
+	for _, id := range expiredIDs {
+		s.unindexAgent(id)
 	}
 	s.mu.Unlock()
 
-	expiredSet := make(map[string]struct{}, len(expired))
-	for _, name := range expired {
-		expiredSet[name] = struct{}{}
+	expiredNameSet := make(map[string]struct{}, len(expiredNames))
+	for _, name := range expiredNames {
+		expiredNameSet[name] = struct{}{}
 	}
 	for _, c := range channels {
-		for name := range expiredSet {
+		for name := range expiredNameSet {
 			if c.PeerA == name || c.PeerB == name {
 				c.releaseWaiter(name, "lease expired")
 			}
 		}
 	}
 	for _, r := range rooms {
-		if r.removeMembers(expiredSet) {
+		if r.removeMembers(expiredNameSet) {
 			s.persistRoomMembers(r)
 		}
 	}
-	for _, name := range expired {
-		s.removeAgentFile(name)
+	for _, id := range expiredIDs {
+		s.removeAgentFile(id)
 	}
 }
 
@@ -180,16 +202,16 @@ func (s *State) dispatch(req Request) Response {
 	// register is unauthenticated by design — first-to-claim binds the pubkey
 	// for that name via ensureKey (which reuses an existing key if present).
 	// every other op that carries `from` must be signed with that pubkey.
-	if req.Op != "register" && req.Op != "stop" && req.Op != "agents" {
+	if req.Op != "register" && req.Op != "stop" && req.Op != "agents" && req.Op != "resolve" {
 		if from, ok := req.Args["from"].(string); ok && from != "" {
 			s.mu.Lock()
-			a, known := s.agents[from]
+			a := s.agentByName(from)
 			var pubHex string
-			if known {
+			if a != nil {
 				pubHex = a.Pubkey
 			}
 			s.mu.Unlock()
-			if !known {
+			if a == nil {
 				return Response{Error: "not registered: " + from, Code: CodeUnauthorized}
 			}
 			if pubHex == "" {
@@ -211,6 +233,8 @@ func (s *State) dispatch(req Request) Response {
 		return s.opUnregister(req)
 	case "agents":
 		return s.opAgents()
+	case "resolve":
+		return s.opResolve(req)
 	case "rooms":
 		return s.opRooms(req)
 	case "room_create":
@@ -256,44 +280,85 @@ func (s *State) opRegister(req Request) Response {
 		return Response{Error: "keygen failed: " + err.Error()}
 	}
 	pubHex := fmt.Sprintf("%x", pub)
+
+	// Collect optional metadata sent by the client
+	info := AgentInfo{
+		Harness:  strVal(req.Args, "harness"),
+		Model:    strVal(req.Args, "model"),
+		Project:  strVal(req.Args, "project"),
+		RepoURL:  strVal(req.Args, "repo_url"),
+		Worktree: strVal(req.Args, "worktree"),
+		Branch:   strVal(req.Args, "branch"),
+		CWD:      strVal(req.Args, "cwd"),
+	}
+
 	now := time.Now()
 	s.mu.Lock()
-	a, ok := s.agents[name]
-	if !ok {
-		a = &Agent{Name: name, StartedAt: now}
-		s.agents[name] = a
+	// Check if this name is already registered; reuse same AgentID if so.
+	a := s.agentByName(name)
+	if a == nil {
+		a = &Agent{
+			AgentID:   newAgentID(),
+			Name:      name,
+			StartedAt: now,
+		}
 	}
 	a.PID = pid
+	a.Pubkey = pubHex
 	a.LastSeenAt = now
 	a.ExpiresAt = now.Add(leaseTTL)
-	a.Pubkey = pubHex
+	// Apply detected metadata (non-empty fields override)
+	if info.Harness != "" {
+		a.Harness = info.Harness
+	}
+	if info.Model != "" {
+		a.Model = info.Model
+	}
+	if info.Project != "" {
+		a.Project = info.Project
+	}
+	if info.RepoURL != "" {
+		a.RepoURL = info.RepoURL
+	}
+	if info.Worktree != "" {
+		a.Worktree = info.Worktree
+	}
+	if info.Branch != "" {
+		a.Branch = info.Branch
+	}
+	if info.CWD != "" {
+		a.CWD = info.CWD
+	}
+	s.indexAgent(a)
 	snapshot := *a
 	s.mu.Unlock()
 	s.persistAgent(&snapshot)
 	return Response{OK: true, Data: map[string]any{
 		"name":       name,
+		"agent_id":   snapshot.AgentID,
 		"expires_at": snapshot.ExpiresAt.Format(time.RFC3339),
 		"pubkey":     pubHex,
 	}}
 }
 
-// opUnregister drops the caller from the agent registry, releases their
-// in-flight channel waiters, evicts them from every room, removes
-// their registry file, and deletes their private key on disk. A later
-// register under the same name generates a fresh keypair and a new
-// pubkey — existing signatures do not survive. Request is signed and
-// authenticated through the dispatch pre-switch.
+func strVal(args map[string]any, key string) string {
+	v, _ := args[key].(string)
+	return v
+}
+
 func (s *State) opUnregister(req Request) Response {
 	from, _ := req.Args["from"].(string)
 	if from == "" {
 		return Response{Error: "from required"}
 	}
 	s.mu.Lock()
-	if _, ok := s.agents[from]; !ok {
+	a := s.agentByName(from)
+	if a == nil {
 		s.mu.Unlock()
 		return Response{Error: "not registered: " + from, Code: CodeNotFound}
 	}
-	delete(s.agents, from)
+	agentID := a.AgentID
+	s.unindexAgent(agentID)
 	delete(s.anyWaiter, from)
 	channels := make([]*Channel, 0, len(s.channels))
 	for _, c := range s.channels {
@@ -316,7 +381,7 @@ func (s *State) opUnregister(req Request) Response {
 			s.persistRoomMembers(r)
 		}
 	}
-	s.removeAgentFile(from)
+	s.removeAgentFile(agentID)
 	_ = removeKey(from)
 
 	return Response{OK: true, Data: map[string]any{"name": from}}
@@ -328,8 +393,8 @@ func (s *State) opRenew(req Request) Response {
 		return Response{Error: "from required"}
 	}
 	s.mu.Lock()
-	a, ok := s.agents[from]
-	if !ok {
+	a := s.agentByName(from)
+	if a == nil {
 		s.mu.Unlock()
 		return Response{Error: "not registered: " + from, Code: CodeNotFound}
 	}
@@ -350,6 +415,12 @@ func (s *State) opChannels(req Request) Response {
 	if from == "" {
 		return Response{Error: "from required"}
 	}
+	s.mu.Lock()
+	if s.agentByName(from) == nil {
+		s.mu.Unlock()
+		return Response{Error: "not registered: " + from, Code: CodeNotFound}
+	}
+	s.mu.Unlock()
 	out := []any{}
 	for _, c := range s.listChannels(from) {
 		c.mu.Lock()
@@ -377,16 +448,18 @@ func (s *State) opTell(req Request) Response {
 		return Response{Error: "cannot tell self"}
 	}
 	s.mu.Lock()
-	if _, ok := s.agents[from]; !ok {
+	if s.agentByName(from) == nil {
 		s.mu.Unlock()
 		return Response{Error: "caller not registered: " + from, Code: CodeNotFound}
 	}
-	if _, ok := s.agents[peer]; !ok {
+	// Resolve peer address to a name
+	peerName, err := s.resolvePeerName(peer)
+	if err != nil {
 		s.mu.Unlock()
-		return Response{Error: "peer not registered: " + peer, Code: CodeNotFound}
+		return Response{Error: err.Error(), Code: CodeNotFound}
 	}
 	s.mu.Unlock()
-	ch := s.getOrCreateChannel(from, peer)
+	ch := s.getOrCreateChannel(from, peerName)
 	return ch.tell(s, from, body)
 }
 
@@ -409,12 +482,13 @@ func (s *State) opRead(req Request) Response {
 	}
 	if peer != "" {
 		s.mu.Lock()
-		if _, ok := s.agents[peer]; !ok {
+		peerName, err := s.resolvePeerName(peer)
+		if err != nil {
 			s.mu.Unlock()
-			return Response{Error: "peer not registered: " + peer, Code: CodeNotFound}
+			return Response{Error: err.Error(), Code: CodeNotFound}
 		}
 		s.mu.Unlock()
-		ch := s.getOrCreateChannel(from, peer)
+		ch := s.getOrCreateChannel(from, peerName)
 		return ch.read(from, time.Duration(timeout)*time.Second)
 	}
 	return s.roomRead(from, room, time.Duration(timeout)*time.Second)
@@ -436,16 +510,17 @@ func (s *State) opPeek(req Request) Response {
 	}
 	if peer != "" {
 		s.mu.Lock()
-		if _, ok := s.agents[peer]; !ok {
+		peerName, err := s.resolvePeerName(peer)
+		if err != nil {
 			s.mu.Unlock()
-			return Response{Error: "peer not registered: " + peer, Code: CodeNotFound}
+			return Response{Error: err.Error(), Code: CodeNotFound}
 		}
-		_, hasChannel := s.channels[channelKey(from, peer)]
+		_, hasChannel := s.channels[channelKey(from, peerName)]
 		s.mu.Unlock()
 		if !hasChannel {
-			return Response{OK: true, Data: map[string]any{"peer": peer, "messages": []any{}}}
+			return Response{OK: true, Data: map[string]any{"peer": peerName, "messages": []any{}}}
 		}
-		ch := s.getOrCreateChannel(from, peer)
+		ch := s.getOrCreateChannel(from, peerName)
 		return ch.peek(from)
 	}
 	return s.roomPeek(from, room)
@@ -608,7 +683,10 @@ func (s *State) opAgents() Response {
 	data := make([]any, 0, len(s.agents))
 	for _, a := range s.agents {
 		data = append(data, map[string]any{
+			"agent_id":     a.AgentID,
 			"name":         a.Name,
+			"qualified":    qualifiedName(a),
+			"harness":      a.Harness,
 			"pid":          a.PID,
 			"started_at":   a.StartedAt.Format(time.RFC3339),
 			"last_seen_at": a.LastSeenAt.Format(time.RFC3339),
@@ -616,6 +694,38 @@ func (s *State) opAgents() Response {
 		})
 	}
 	return Response{OK: true, Data: data}
+}
+
+// opResolve resolves an address string to an agent_id. Used by the
+// nickname command for stable binding.
+func (s *State) opResolve(req Request) Response {
+	address, _ := req.Args["address"].(string)
+	if address == "" {
+		return Response{Error: "address required"}
+	}
+	nicknames, _ := loadNicknames()
+	s.mu.Lock()
+	agentID, err := s.ResolveAddress(address, nicknames)
+	s.mu.Unlock()
+	if err != nil {
+		return Response{Error: err.Error(), Code: CodeNotFound}
+	}
+	return Response{OK: true, Data: map[string]any{"agent_id": agentID}}
+}
+
+// resolvePeerName resolves an address to a registered agent's display name.
+// Must be called with s.mu held. Returns the name for use in channel keys.
+func (s *State) resolvePeerName(addr string) (string, error) {
+	nicknames, _ := loadNicknames()
+	agentID, err := s.ResolveAddress(addr, nicknames)
+	if err != nil {
+		return "", err
+	}
+	a, ok := s.agents[agentID]
+	if !ok {
+		return "", fmt.Errorf("agent not found: %s", addr)
+	}
+	return a.Name, nil
 }
 
 func (s *State) opStop() Response {

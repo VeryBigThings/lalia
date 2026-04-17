@@ -8,32 +8,46 @@ import (
 	"time"
 )
 
-// persistAgent writes <workspace>/registry/<name>.json via the writer queue.
+// persistAgent writes <workspace>/registry/<agent_id>.json via the writer queue.
 func (s *State) persistAgent(a *Agent) {
 	data, _ := json.MarshalIndent(a, "", "  ")
 	data = append(data, '\n')
 	s.enqueueWrite(
-		filepath.Join("registry", a.Name+".json"),
+		filepath.Join("registry", a.AgentID+".json"),
 		data,
-		fmt.Sprintf("register %s (lease until %s)", a.Name, a.ExpiresAt.Format(time.RFC3339)),
+		fmt.Sprintf("register %s/%s (lease until %s)", a.Name, a.AgentID, a.ExpiresAt.Format(time.RFC3339)),
 	)
 }
 
-// removeAgentFile enqueues deletion of an agent's registry file.
-// We do not git-rm (would require a different writeOp variant for MVP);
-// instead, overwrite the file with a tombstone record so the history is
-// preserved and the sweeper can re-pick it up as expired.
-// Simpler approach: just delete the file directly without a git commit
-// for the removal, since expiry-sweep is idempotent. The invariant is
-// "file absent ⇒ agent unknown on restart," which is what we want.
-func (s *State) removeAgentFile(name string) {
-	p := filepath.Join(workspacePath(), "registry", name+".json")
+// removeAgentFile deletes an agent's registry file. The invariant is
+// "file absent ⇒ agent unknown on restart" — idempotent and correct.
+func (s *State) removeAgentFile(agentID string) {
+	p := filepath.Join(workspacePath(), "registry", agentID+".json")
 	_ = os.Remove(p)
 }
 
+// indexAgent adds an agent to the in-memory indexes. Must be called with s.mu held.
+func (s *State) indexAgent(a *Agent) {
+	s.agents[a.AgentID] = a
+	s.nameIdx[a.Name] = a.AgentID // last registration for this name wins
+}
+
+// unindexAgent removes an agent from both indexes. Must be called with s.mu held.
+func (s *State) unindexAgent(agentID string) {
+	a, ok := s.agents[agentID]
+	if !ok {
+		return
+	}
+	delete(s.agents, agentID)
+	if s.nameIdx[a.Name] == agentID {
+		delete(s.nameIdx, a.Name)
+	}
+}
+
 // loadRegistry rehydrates the in-memory agents map from files on startup.
-// Skips records whose lease has already expired; the sweeper will catch any
-// we miss here on its next tick.
+// Handles migration: legacy name-keyed files (no agent_id) are backfilled
+// with a ULID and renamed to <agent_id>.json, preserving pubkeys.
+// Skips records whose lease has already expired.
 func (s *State) loadRegistry() error {
 	dir := filepath.Join(workspacePath(), "registry")
 	entries, err := os.ReadDir(dir)
@@ -48,7 +62,8 @@ func (s *State) loadRegistry() error {
 		if e.IsDir() || filepath.Ext(e.Name()) != ".json" {
 			continue
 		}
-		b, err := os.ReadFile(filepath.Join(dir, e.Name()))
+		fpath := filepath.Join(dir, e.Name())
+		b, err := os.ReadFile(fpath)
 		if err != nil {
 			continue
 		}
@@ -60,10 +75,22 @@ func (s *State) loadRegistry() error {
 			continue
 		}
 		if !a.ExpiresAt.IsZero() && now.After(a.ExpiresAt) {
-			_ = os.Remove(filepath.Join(dir, e.Name()))
+			_ = os.Remove(fpath)
 			continue
 		}
-		s.agents[a.Name] = &a
+
+		// Migration: backfill AgentID for legacy name-keyed records
+		if a.AgentID == "" {
+			a.AgentID = newAgentID()
+			newPath := filepath.Join(dir, a.AgentID+".json")
+			data, _ := json.MarshalIndent(&a, "", "  ")
+			data = append(data, '\n')
+			if err := os.WriteFile(newPath, data, 0600); err == nil {
+				_ = os.Remove(fpath)
+			}
+		}
+
+		s.indexAgent(&a)
 	}
 	return nil
 }

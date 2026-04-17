@@ -26,6 +26,8 @@ func main() {
 		cmdUnregister(os.Args[2:])
 	case "agents":
 		cmdAgents(os.Args[2:])
+	case "nickname":
+		cmdNickname(os.Args[2:])
 	case "rooms":
 		cmdRooms(os.Args[2:])
 	case "room":
@@ -83,10 +85,11 @@ Rooms (N-party):
   peek R --room = inspect room mailbox
 
 Usage:
-  lesche register [--name <name>]
+  lesche register [--name <name>] [--harness H] [--model M] [--project P]
   lesche unregister                      drop yourself from the registry
   lesche agents
   lesche channels                        list your peer-pair channels
+  lesche nickname [<nick> [<address>]] [-d <nick>] [--follow]
 
   lesche tell <peer> "<msg>"             async, no reply expected
   lesche ask  <peer> "<msg>" [--timeout N]   send then block for reply
@@ -108,11 +111,28 @@ Usage:
   lesche --version
 
 Identity:
-  On register, lesche generates an Ed25519 keypair for your name.
+  On register, lesche generates an Ed25519 keypair for your name and assigns
+  a stable ULID agent_id. The agent_id persists across re-registrations as
+  long as the keypair file is intact. Rich metadata (project, branch, harness,
+  model) is auto-detected from git and the caller's environment.
   Public key lives in the registry; private key at ~/.lesche/keys/<name>.key
   (mode 0600). Every authenticated request is signed by your key and
   verified by the daemon. Another process passing --as <your-name> without
   your key will be rejected with exit code 6.
+
+  Address forms (accepted wherever a peer is specified):
+    <nick>                  user-assigned nickname
+    <ULID>                  bare agent_id
+    name@project            fully-qualified, project scoped
+    name@project:branch     fully-qualified, branch scoped
+    name                    bare name (error if ambiguous)
+
+  Nicknames (stored at ~/.lesche/nicknames.json):
+    lesche nickname <nick> <address>        assign (stable by default)
+    lesche nickname --follow <nick> <addr>  assign (follows address re-resolution)
+    lesche nickname <nick>                  show current resolution
+    lesche nickname                         list all
+    lesche nickname -d <nick>              delete
 
 Environment:
   LESCHE_NAME       caller identity for all commands (override per-call with --as)
