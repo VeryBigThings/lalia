@@ -24,6 +24,12 @@ func main() {
 		cmdRegister(os.Args[2:])
 	case "unregister":
 		cmdUnregister(os.Args[2:])
+	case "init":
+		cmdInit(os.Args[2:])
+	case "prompt":
+		cmdPrompt(os.Args[2:])
+	case "run":
+		cmdRun(os.Args[2:])
 	case "agents":
 		cmdAgents(os.Args[2:])
 	case "nickname":
@@ -85,6 +91,13 @@ Rooms (N-party):
   peek R --room = inspect room mailbox
 
 Usage:
+  lesche init <worker|supervisor>       print role bootstrap prompt to stdout
+  lesche prompt <worker|supervisor> [--force]
+                                        write ./LESCHE.md bootstrap prompt
+  lesche run <worker|supervisor> --claude-code [args...]
+  lesche run <worker|supervisor> --codex       [args...]
+  lesche run <worker|supervisor> --copilot     [--force] [args...]
+
   lesche register [--name <name>] [--harness H] [--model M] [--project P]
   lesche unregister                      drop yourself from the registry
   lesche agents
@@ -109,6 +122,10 @@ Usage:
   lesche stop
   lesche protocol                        print agent-facing protocol guide
   lesche --version
+
+Prompt/run safety:
+  Overwrite is refused when an existing instructions file does not carry
+  a lesche marker. Pass --force to override where supported.
 
 Identity:
   On register, lesche generates an Ed25519 keypair for your name and assigns
