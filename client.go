@@ -129,6 +129,9 @@ func cmdRegister(args []string) {
 		"name": name,
 		"pid":  os.Getpid(),
 	}
+	if role := parseFlag(args, "--role"); role != "" {
+		reqArgs["role"] = role
+	}
 	if info.Harness != "" {
 		reqArgs["harness"] = info.Harness
 	}
@@ -455,6 +458,155 @@ func cmdHistory(args []string) {
 			fmt.Printf("[%v %v %v] %v\n", row["seq"], row["ts"], row["from"], row["body"])
 		}
 	})
+}
+
+// cmdPlan routes plan subcommands. The project is auto-detected from the
+// caller's git environment unless --project is specified explicitly.
+func cmdPlan(args []string) {
+	if len(args) < 1 {
+		fmt.Fprintln(os.Stderr, "usage: lesche plan <create|assign|unassign|status|claim|show|list|handoff>")
+		os.Exit(1)
+	}
+	sub := args[0]
+	rest := args[1:]
+
+	// Auto-detect project from CWD unless explicitly overridden.
+	info := DetectAgentInfo(AgentInfo{})
+	detectedProject := projectID(info.RepoURL, info.Project)
+
+	proj := parseFlag(rest, "--project")
+	if proj == "" {
+		proj = detectedProject
+	}
+	from := mustCaller(rest)
+
+	switch sub {
+	case "create":
+		if len(rest) < 1 || rest[0] == "" || rest[0][0] == '-' {
+			fmt.Fprintln(os.Stderr, "usage: lesche plan create <slug> [--goal <text>] [--project <id>]")
+			os.Exit(1)
+		}
+		slug := rest[0]
+		goal := parseFlag(rest, "--goal")
+		resp, err := request("plan_create", map[string]any{
+			"from": from, "project": proj, "slug": slug, "goal": goal,
+		})
+		handle(resp, err, func(data any) {
+			m := data.(map[string]any)
+			fmt.Printf("created slug=%s project=%s status=%s\n", m["slug"], m["project"], m["status"])
+		})
+
+	case "assign":
+		if len(rest) < 2 {
+			fmt.Fprintln(os.Stderr, "usage: lesche plan assign <slug> <agent> --worktree <path> [--goal <text>] [--kickoff <text>] [--project <id>]")
+			os.Exit(1)
+		}
+		slug, owner := rest[0], rest[1]
+		worktree := parseFlag(rest, "--worktree")
+		goal := parseFlag(rest, "--goal")
+		kickoff := parseFlag(rest, "--kickoff")
+		resp, err := request("plan_assign", map[string]any{
+			"from": from, "project": proj, "slug": slug, "owner": owner,
+			"worktree": worktree, "goal": goal, "kickoff": kickoff,
+		})
+		handle(resp, err, func(data any) {
+			m := data.(map[string]any)
+			fmt.Printf("assigned slug=%s owner=%s status=%s\n", m["slug"], m["owner"], m["status"])
+		})
+
+	case "unassign":
+		if len(rest) < 1 || rest[0] == "" || rest[0][0] == '-' {
+			fmt.Fprintln(os.Stderr, "usage: lesche plan unassign <slug> [--project <id>]")
+			os.Exit(1)
+		}
+		slug := rest[0]
+		resp, err := request("plan_unassign", map[string]any{
+			"from": from, "project": proj, "slug": slug,
+		})
+		handle(resp, err, func(data any) {
+			m := data.(map[string]any)
+			fmt.Printf("unassigned slug=%s status=%s\n", m["slug"], m["status"])
+		})
+
+	case "status":
+		if len(rest) < 2 {
+			fmt.Fprintln(os.Stderr, "usage: lesche plan status <slug> <in-progress|ready|blocked|merged> [--project <id>]")
+			os.Exit(1)
+		}
+		slug, status := rest[0], rest[1]
+		resp, err := request("plan_status", map[string]any{
+			"from": from, "project": proj, "slug": slug, "status": status,
+		})
+		handle(resp, err, func(data any) {
+			m := data.(map[string]any)
+			fmt.Printf("slug=%s status=%s\n", m["slug"], m["status"])
+		})
+
+	case "claim":
+		if len(rest) < 1 || rest[0] == "" || rest[0][0] == '-' {
+			fmt.Fprintln(os.Stderr, "usage: lesche plan claim <slug> [--worktree <path>] [--project <id>]")
+			os.Exit(1)
+		}
+		slug := rest[0]
+		worktree := parseFlag(rest, "--worktree")
+		if worktree == "" {
+			worktree, _ = os.Getwd()
+		}
+		resp, err := request("plan_claim", map[string]any{
+			"from": from, "project": proj, "slug": slug, "worktree": worktree,
+		})
+		handle(resp, err, func(data any) {
+			m := data.(map[string]any)
+			fmt.Printf("claimed slug=%s owner=%s status=%s\n", m["slug"], m["owner"], m["status"])
+		})
+
+	case "show":
+		resp, err := request("plan_show", map[string]any{
+			"from": from, "project": proj,
+		})
+		handle(resp, err, func(data any) {
+			m := data.(map[string]any)
+			fmt.Printf("project=%s supervisor=%s\n", m["project_id"], m["supervisor"])
+			rows, _ := m["assignments"].([]any)
+			for _, row := range rows {
+				a := row.(map[string]any)
+				fmt.Printf("  slug=%-24s owner=%-16s status=%s\n", a["slug"], a["owner"], a["status"])
+			}
+		})
+
+	case "list":
+		resp, err := request("plan_list", map[string]any{"from": from})
+		handle(resp, err, func(data any) {
+			plans, _ := data.([]any)
+			for _, p := range plans {
+				m := p.(map[string]any)
+				fmt.Printf("project=%s supervisor=%s\n", m["project_id"], m["supervisor"])
+				rows, _ := m["assignments"].([]any)
+				for _, row := range rows {
+					a := row.(map[string]any)
+					fmt.Printf("  slug=%-24s owner=%-16s status=%s\n", a["slug"], a["owner"], a["status"])
+				}
+			}
+		})
+
+	case "handoff":
+		if len(rest) < 1 || rest[0] == "" || rest[0][0] == '-' {
+			fmt.Fprintln(os.Stderr, "usage: lesche plan handoff <new-supervisor> [--project <id>]")
+			os.Exit(1)
+		}
+		newSup := rest[0]
+		resp, err := request("plan_handoff", map[string]any{
+			"from": from, "project": proj, "to": newSup,
+		})
+		handle(resp, err, func(data any) {
+			m := data.(map[string]any)
+			fmt.Printf("project=%s new supervisor=%s\n", m["project"], m["supervisor"])
+		})
+
+	default:
+		fmt.Fprintf(os.Stderr, "unknown plan subcommand: %s\n", sub)
+		os.Exit(1)
+	}
 }
 
 func cmdRenew(args []string) {

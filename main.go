@@ -60,6 +60,8 @@ func main() {
 		cmdChannels(os.Args[2:])
 	case "history":
 		cmdHistory(os.Args[2:])
+	case "plan":
+		cmdPlan(os.Args[2:])
 	case "renew":
 		cmdRenew(os.Args[2:])
 	case "stop":
@@ -98,7 +100,7 @@ Usage:
   lesche run <worker|supervisor> --codex       [args...]
   lesche run <worker|supervisor> --copilot     [--force] [args...]
 
-  lesche register [--name <name>] [--harness H] [--model M] [--project P]
+  lesche register [--name <name>] [--harness H] [--model M] [--project P] [--role supervisor|worker]
   lesche unregister                      drop yourself from the registry
   lesche agents
   lesche channels                        list your peer-pair channels
@@ -120,6 +122,16 @@ Usage:
   lesche history <peer|room> [--room] [--since SEQ] [--limit N]
   lesche renew                           extend caller's lease
   lesche stop
+
+Plan (supervisor/worker roles):
+  lesche plan create <slug> [--goal <text>] [--project <id>]
+  lesche plan assign <slug> <agent> --worktree <path> [--goal <text>] [--kickoff <text>] [--project <id>]
+  lesche plan unassign <slug> [--project <id>]
+  lesche plan status <slug> <in-progress|ready|blocked|merged> [--project <id>]
+  lesche plan claim <slug> [--worktree <path>] [--project <id>]
+  lesche plan show [--project <id>]
+  lesche plan list
+  lesche plan handoff <new-supervisor> [--project <id>]
   lesche protocol                        print agent-facing protocol guide
   lesche --version
 

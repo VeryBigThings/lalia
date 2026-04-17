@@ -237,6 +237,57 @@ account "<agent name>"). If the Keychain backend is unavailable (non-macOS,
 or the 'security' CLI is missing) lesche falls back to the file backend
 silently. Unset or any other value selects the file backend.
 
+## Plan — assignment tracking
+
+A plan is a git-backed list of work assignments per project. The project id is
+auto-derived from the git remote URL (slugified) or the repo basename.
+
+Roles are set at register time and never change without an explicit re-register:
+
+    lesche register --role supervisor
+    lesche register --role worker
+
+One supervisor per project. The first supervisor to create a plan for a project
+owns it. Unregister is rejected with exit code 7 (supervisor_busy) while the
+supervisor has non-merged assignments; run plan handoff first.
+
+### Supervisor commands
+
+    lesche plan create <slug> [--goal <text>]
+    lesche plan assign <slug> <agent> --worktree <path> [--goal <text>] [--kickoff <text>]
+    lesche plan unassign <slug>           (archives slug room; no more posts)
+    lesche plan status <slug> merged      (archives slug room)
+    lesche plan handoff <new-supervisor>
+    lesche plan show [--project <id>]     (anyone; defaults to cwd project)
+
+### Worker commands
+
+    lesche plan claim <slug> [--worktree <path>]   (open → in-progress)
+    lesche plan status <slug> in-progress|ready|blocked   (own row only)
+    lesche plan list                               (plans where caller is supervisor or owner)
+
+### Assignment status transitions
+
+    open → assigned      (supervisor: plan assign)
+    open → in-progress   (worker:     plan claim)
+    assigned → *         (owner:      plan status in-progress|ready|blocked)
+    * → merged           (supervisor: plan status merged)   — archives room
+    * → open             (supervisor: plan unassign)        — archives room
+
+### Kickoff messages
+
+If --kickoff is supplied on plan assign, the text is delivered as a room post
+from the supervisor into the slug's room on the owner's next register. This
+lets supervisors front-load context before the worker has started their
+session. The kickoff is delivered exactly once; re-register does not replay it.
+
+### Assignment-scoped rooms
+
+plan assign auto-creates a room named after the slug and joins both the
+supervisor and the owner. Use lesche post <slug> to coordinate in that room.
+
+Exit code 7 = supervisor_busy (unregister blocked; call plan handoff first).
+
 ## Common mistakes
 
 - Using "tell" when the human asked you to "ask" — you'll return
