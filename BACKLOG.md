@@ -31,7 +31,7 @@ context from a previous session. Read these files in order before
 writing a line of code. Your workstream section below adds extra
 files on top of this.
 
-1. **`COORDINATOR.md`** (this file) — top to bottom. Especially
+1. **`BACKLOG.md`** (this file) — top to bottom. Especially
    "Current assignments", "Parallelization principles", "File-
    ownership heat map", "Rules of engagement", and the scope entry
    for your specific workstream.
@@ -130,13 +130,13 @@ Tell the coordinator, in one message, exactly these things:
 - Your harness (`copilot` / `codex` / `claude-code`).
 - The workstream you were assigned (or "unassigned, awaiting
   direction").
-- Confirmation that you have read `COORDINATOR.md` (or a question
+- Confirmation that you have read `BACKLOG.md` (or a question
   if you haven't and don't understand it).
 - Any blockers before you start (e.g. nickname storage question
   for `feat/identity`).
 
 ```
-lesche tell claude-coordinator "harness: codex. assigned feat/keychain. COORDINATOR.md read. no blockers."
+lesche tell claude-coordinator "harness: codex. assigned feat/keychain. BACKLOG.md read. no blockers."
 ```
 
 No tunnel to open, no sid to track. Your channel with the coordinator
@@ -242,10 +242,16 @@ run `lesche protocol`. Full help: `lesche help`.
 - `feat/identity` — reassigned to Copilot (see below). Head still at
   `a907186`; not started. Needs rebase on new main before work begins.
 
-**Designed, not implemented:**
-- Structured error payloads (workstream F), keychain integration
-  (workstream E), plan primitive + manager/worker roles (workstream
-  H; unassigned), multi-project workspace isolation.
+**Designed, not implemented (priority order):**
+- **I. `lesche init` + `lesche run` harness integration** (unassigned;
+  top of queue). Emit role-specific system-prompt files and spawn the
+  right harness with the prompt injected. Also renames "manager" →
+  "supervisor" across docs + the H workstream spec.
+- F. Structured error payloads (in flight on `feat/errors`; codex
+  rebasing post-A).
+- H. Plan primitive + supervisor/worker roles (unassigned;
+  sequenced after I to pick up the rename).
+- Multi-project workspace isolation (no design yet).
 
 **Killed:**
 - Resumable blocking (workstream D). The turn FSM is gone, so there
@@ -442,6 +448,69 @@ to `tunnel.go` is stale and should be read as `channel.go`.
 Each entry lists: one-line goal, scope, primary files, test
 requirements, and any sequencing constraints.
 
+### I. `lesche init` + `lesche run` harness integration  **← top of queue**
+
+**Goal**: Onboard a worker or supervisor agent into a lesche-
+coordinated session with one command. `lesche init <role>` emits a
+role-specific system prompt (stdout). `lesche run <role> --<harness>
+[...args]` writes the prompt where the harness reads it and spawns
+the harness with the args forwarded. Also: cascade the manager →
+supervisor rename through docs and workstream H spec before H
+starts.
+
+**Scope**:
+- New commands: `lesche init worker`, `lesche init supervisor`,
+  `lesche run worker --<harness>`, `lesche run supervisor --<harness>`.
+- Embedded prompts via `//go:embed`: `prompts/worker.md`,
+  `prompts/supervisor.md`. Edit these as markdown, print verbatim.
+- Both prompts follow the 5-part skeleton: role posture, three
+  questions for the human (name / workstream / context), bootstrap
+  commands in order (register, join or create the slug's room,
+  peek), ongoing rules (rooms-first, checkpoint reports, never run
+  `./bin/lesche`, never set LESCHE_HOME/WORKSPACE), exit protocol
+  (`lesche unregister` on permanent shutdown).
+- `lesche run` harness mapping (verified via local CLI inspection,
+  see research in git history for citations):
+  - `--claude-code`: write LESCHE.md to cwd, exec
+    `claude --append-system-prompt-file LESCHE.md "$@"`.
+  - `--codex`: write LESCHE.md to cwd, exec
+    `codex -c experimental_instructions_file='"'$PWD/LESCHE.md'"' "$@"`.
+    Flag is experimental; fall back to writing AGENTS.md to cwd if
+    the key renames.
+  - `--copilot`: no instructions-file flag exists. Write (or append
+    with a heading marker) `.github/copilot-instructions.md`, then
+    exec `copilot "$@"`. Require `--force` to overwrite an existing
+    file without a lesche marker.
+- Rename cascade: every occurrence of "manager" in BACKLOG.md and
+  workstream H's catalog entry becomes "supervisor". The
+  `ManagerBusy` error code reserved slot in H becomes `SupervisorBusy`.
+  The agent name `claude-coordinator` stays — coordinator is a
+  name, not a role; roles are a separate axis.
+
+**Files**: new `prompts/worker.md`, new `prompts/supervisor.md`, new
+`run.go` (exec-wrapper), `client.go` (cmdInit, cmdRun), `main.go`
+(dispatch), `help.go` (document both commands), `BACKLOG.md` (rename
+cascade — edit in same commit, not a follow-up).
+
+**Tests**:
+- `lesche init worker` stdout matches embedded file byte-for-byte.
+- `lesche run worker --claude-code` with stubbed `claude` on PATH
+  writes LESCHE.md and execs with the expected flag set.
+- `lesche run worker --codex` stub test likewise.
+- `lesche run worker --copilot` without `--force` on an existing
+  `.github/copilot-instructions.md` (without lesche marker) errors
+  before touching the file.
+- No daemon calls: both commands work with no running daemon.
+- Cold exec: `lesche init` succeeds before `lesche register`.
+
+**Blockers**: None. Pure client-side. Does not touch `state.go`,
+`channel.go`, `room.go`, or any daemon internals.
+
+**Agent fit**: Any agent that can write Go and a few test cases.
+Self-contained; good cold-start workstream — smaller surface than
+F or H. Doesn't collide with F (no overlap). Unblocks H (which
+needs the rename).
+
 ### A. Identity refactor + nicknames
 
 **Goal**: Replace name-as-primary-key with ULID agent_id + rich
@@ -502,7 +571,7 @@ behavior when backend is unavailable.
 assignments. Move the assignment table into a git-backed `plan.json`
 per project, mutable via `lesche plan …` commands. Introduce a role
 axis on Agent (manager vs worker) so the daemon knows who can mutate
-what. COORDINATOR.md stays for rationale, rules of engagement, cold-
+what. BACKLOG.md stays for rationale, rules of engagement, cold-
 start reading — it stops holding live state.
 
 **Scope** (decisions already made, see conversation log):
@@ -604,11 +673,15 @@ handlers.
 
 ## Sequencing after the current batch
 
-After A merges, H (plan primitive + roles) unblocks. Pick it up with
-the first agent to finish A/E/F cleanly. After H lands, the next-up
-work is multi-project workspace isolation (one daemon managing state
-for several repos without collision); no written design yet — write
-a short design doc first when that batch starts.
+A and E merged. F is in flight (codex, rebasing post-A). Next queue:
+
+1. **I. `lesche init` + `lesche run`** — top of queue. Self-contained,
+   no daemon touch, unblocks H by cascading the supervisor rename.
+2. **H. Plan primitive + supervisor/worker roles** — sequenced after I
+   so H inherits the supervisor vocabulary instead of introducing then
+   renaming it.
+3. **Multi-project workspace isolation** — one daemon, many repos, no
+   collision. No design doc yet; draft one when starting the batch.
 
 ## Rules of engagement
 

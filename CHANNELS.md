@@ -212,7 +212,7 @@ just stop getting new writes.
   there is no waiter state to lose on timeout. `read` simply
   returns empty and the caller calls `read` again. No `resume`
   command needed. If `claude-code` is assigned D in the current
-  batch (`COORDINATOR.md` as of `7bccb07`), reassign them before
+  batch (`BACKLOG.md` as of `7bccb07`), reassign them before
   they start.
 
 ## Risks and open questions
@@ -249,7 +249,7 @@ errors (F) — heavy overlap with state.go and client.go.
 
 Recommended sequencing:
 
-1. Finish current batch (A/D/E) per `COORDINATOR.md`. **Kill D**
+1. Finish current batch (A/D/E) per `BACKLOG.md`. **Kill D**
    (resumable blocking) and reassign that agent or leave them
    idle pending this workstream.
 2. Land structured errors (F) solo after A and E merge. Structured
