@@ -7,16 +7,16 @@ import (
 )
 
 type Agent struct {
-	AgentID    string    `json:"agent_id"`              // ULID, stable for the life of the keypair
-	Name       string    `json:"name"`                  // display name, not unique
-	Pubkey     string    `json:"pubkey"`                // hex-encoded Ed25519 public key
-	Harness    string    `json:"harness,omitempty"`     // claude-code | codex | cursor | …
-	Model      string    `json:"model,omitempty"`       // e.g. claude-opus-4-7
-	Project    string    `json:"project,omitempty"`     // resolved from git remote or cwd
-	RepoURL    string    `json:"repo_url,omitempty"`    // full remote URL when available
-	Worktree   string    `json:"worktree,omitempty"`    // basename of cwd
-	Branch     string    `json:"branch,omitempty"`      // git rev-parse --abbrev-ref HEAD
-	CWD        string    `json:"cwd,omitempty"`         // full path the agent is running from
+	AgentID    string    `json:"agent_id"`           // ULID, stable for the life of the keypair
+	Name       string    `json:"name"`               // display name, not unique
+	Pubkey     string    `json:"pubkey"`             // hex-encoded Ed25519 public key
+	Harness    string    `json:"harness,omitempty"`  // claude-code | codex | cursor | …
+	Model      string    `json:"model,omitempty"`    // e.g. claude-opus-4-7
+	Project    string    `json:"project,omitempty"`  // resolved from git remote or cwd
+	RepoURL    string    `json:"repo_url,omitempty"` // full remote URL when available
+	Worktree   string    `json:"worktree,omitempty"` // basename of cwd
+	Branch     string    `json:"branch,omitempty"`   // git rev-parse --abbrev-ref HEAD
+	CWD        string    `json:"cwd,omitempty"`      // full path the agent is running from
 	PID        int       `json:"pid"`
 	StartedAt  time.Time `json:"started_at"`
 	LastSeenAt time.Time `json:"last_seen_at"`
@@ -29,8 +29,8 @@ const sweepInterval = 30 * time.Second
 
 type State struct {
 	mu       sync.Mutex
-	agents   map[string]*Agent  // keyed by agent_id (ULID)
-	nameIdx  map[string]string  // name → agent_id (multiple IDs per name possible)
+	agents   map[string]*Agent // keyed by agent_id (ULID)
+	nameIdx  map[string]string // name → agent_id (multiple IDs per name possible)
 	channels map[string]*Channel
 	rooms    map[string]*Room
 
