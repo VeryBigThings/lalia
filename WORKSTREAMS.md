@@ -37,19 +37,49 @@ end-to-end.
 
 ## Current assignments
 
-Second batch after the rooms + write-queue merges. Identity is the only
-A-tier workstream remaining; handed to Copilot since they shipped the
-write queue with a tight review cycle and have fresh context on the
-coordinator tunnel protocol.
+Second batch after the rooms + write-queue merges. Three-agent parallel
+again; collisions are small (see heat map further down).
 
 | Agent | Branch | Workstream | Worktree path | Status |
 |-------|--------|------------|---------------|--------|
-| Copilot | `feat/identity` | A. Identity refactor + nicknames | `~/Obolos/lesche-identity` | Assigned. Branch head at `a907186`; rebase on `main@e4e7186` before starting. |
-| GPT-5 via Codex | — | — | — | feat/rooms merged at `e4e7186`. Idle; pick next workstream from the catalog below. |
-| Claude Code | — | — | — | Unassigned this batch. Pick next workstream from the catalog below. |
+| `copilot` | `feat/identity` | A. Identity refactor + nicknames | `~/Obolos/lesche-identity` | Assigned. Branch head at `a907186`; rebase on main before starting. |
+| `claude-code` | `feat/resumable` | D. Resumable blocking | `~/Obolos/lesche-resumable` | Assigned. Worktree + branch to create. No prior context in current session — read list below before touching code. |
+| `codex` | `feat/keychain` | E. Keychain integration | `~/Obolos/lesche-keychain` | Assigned. Worktree + branch to create. Self-contained; no protocol change. |
 
 Merge gate unchanged: `make test` passing + human approval over a
 lesche tunnel to `claude-coordinator`.
+
+### Spot patch to bundle with whichever lands first
+
+**Lease TTL.** 10 minutes is too short; all three agents dropped during
+the first-batch merge window. Raise `leaseTTL` in `state.go` to 30 or
+60 minutes and renew lease on `agents` (currently skipped). ~10 lines
+in `state.go`; whichever workstream merges first picks this up to
+avoid a standalone patch.
+
+### Cold-start reading list for `claude-code` (feat/resumable)
+
+Claude Code starts this batch with no context. Read in this order
+before writing a line:
+
+1. `ARCHITECTURE.md` — top-to-bottom.
+2. `IDEA.md` and `MVP.md` — what lesche is and the tunnel spec.
+3. `protocol.go` — wire-level request/response shapes. **Do not
+   edit struct shapes**; F (structured errors) owns that refactor.
+4. `tunnel.go` — the turn FSM, mailbox, send/await semantics. This
+   is the file you will spend the most time in.
+5. `state.go` — dispatch switch (you'll add a `resume` case) and
+   the any-waiter mechanism. Note how `opAwait` currently behaves
+   on timeout (it drops the waiter).
+6. `client.go` — how existing commands are wired client-side
+   (`lesche send`, `lesche await`); add `lesche resume` in the same
+   style.
+7. `main.go` and `help.go` — short; pattern-match the additions.
+8. `daemon_integration_test.go` and `tunnel_test.go` — the style you
+   must match for your tests.
+
+Then look at the catalog entry **D. Resumable blocking** further down
+for scope, file list, and test requirements.
 
 Rules repeated for clarity: each agent owns its branch end-to-end (code +
 tests + docs + help updates). Merge gate is `make test` passing plus human
