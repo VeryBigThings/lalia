@@ -240,6 +240,17 @@ the first-batch merge window. Raise `leaseTTL` in `state.go` to 30 or
 in `state.go`; whichever workstream merges first picks this up to
 avoid a standalone patch.
 
+### Incoming: workstream G (Channels redesign)
+
+See `CHANNELS.md` for the full plan. Summary: drop the turn FSM,
+rename `send`/`await` to `tell`/`read`, add `ask` helper, collapse
+multi-session sids to one channel per peer-pair. This kills
+workstream D (resumable blocking) — without the FSM there is no
+waiter state to resume. Sequenced after the current batch (A/E)
+lands; probably before or around F (structured errors). Single
+agent, single branch. **Claude Code's `feat/resumable` assignment
+above is on pause until this plan is accepted or rejected.**
+
 ### Per-workstream reading list
 
 Read this after the cold-start list above, before writing code.
