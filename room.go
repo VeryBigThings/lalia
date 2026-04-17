@@ -24,6 +24,7 @@ type Room struct {
 	Desc      string
 	CreatedBy string
 	CreatedAt time.Time
+	Archived  bool // set when an assignment is unassigned or merged; blocks new posts
 
 	seq int
 	log []RoomMessage
@@ -240,6 +241,10 @@ func (s *State) opPost(req Request) Response {
 	}
 
 	r.mu.Lock()
+	if r.Archived {
+		r.mu.Unlock()
+		return errorResponse(CodeError, "room_archived", "this room is archived; no new posts allowed", "room archived: "+room, map[string]any{"room": room})
+	}
 	if !r.members[from] {
 		r.mu.Unlock()
 		return errorResponse(CodeNotFound, "room_not_found", "join the room before posting", "room not found: "+room, map[string]any{"from": from, "room": room})

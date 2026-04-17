@@ -10,6 +10,7 @@ type Agent struct {
 	AgentID    string    `json:"agent_id"`           // ULID, stable for the life of the keypair
 	Name       string    `json:"name"`               // display name, not unique
 	Pubkey     string    `json:"pubkey"`             // hex-encoded Ed25519 public key
+	Role       string    `json:"role,omitempty"`     // "supervisor" | "worker" | ""
 	Harness    string    `json:"harness,omitempty"`  // claude-code | codex | cursor | …
 	Model      string    `json:"model,omitempty"`    // e.g. claude-opus-4-7
 	Project    string    `json:"project,omitempty"`  // resolved from git remote or cwd
@@ -33,6 +34,7 @@ type State struct {
 	nameIdx  map[string]string // name → agent_id (multiple IDs per name possible)
 	channels map[string]*Channel
 	rooms    map[string]*Room
+	plans    map[string]*Plan // keyed by project_id
 
 	// state-level any-waiters: one per agent_id, 1-buffered
 	anyWaiter map[string]chan anyMsg
@@ -55,6 +57,7 @@ func newState() (*State, error) {
 		nameIdx:   make(map[string]string),
 		channels:  make(map[string]*Channel),
 		rooms:     make(map[string]*Room),
+		plans:     make(map[string]*Plan),
 		anyWaiter: make(map[string]chan anyMsg),
 		writes:    make(chan writeOp, 128),
 		stop:      make(chan struct{}),
@@ -68,6 +71,9 @@ func newState() (*State, error) {
 	}
 	s.queue = q
 	if err := s.loadRegistry(); err != nil {
+		return nil, err
+	}
+	if err := s.loadPlans(); err != nil {
 		return nil, err
 	}
 	return s, nil
@@ -261,6 +267,22 @@ func (s *State) dispatch(req Request) Response {
 		return s.opChannels(req)
 	case "renew":
 		return s.opRenew(req)
+	case "plan_create":
+		return s.opPlanCreate(req)
+	case "plan_assign":
+		return s.opPlanAssign(req)
+	case "plan_unassign":
+		return s.opPlanUnassign(req)
+	case "plan_status":
+		return s.opPlanStatus(req)
+	case "plan_claim":
+		return s.opPlanClaim(req)
+	case "plan_show":
+		return s.opPlanShow(req)
+	case "plan_list":
+		return s.opPlanList(req)
+	case "plan_handoff":
+		return s.opPlanHandoff(req)
 	case "stop":
 		return s.opStop()
 	default:
@@ -329,15 +351,20 @@ func (s *State) opRegister(req Request) Response {
 	if info.CWD != "" {
 		a.CWD = info.CWD
 	}
+	if role := strVal(req.Args, "role"); role != "" {
+		a.Role = role
+	}
 	s.indexAgent(a)
 	snapshot := *a
 	s.mu.Unlock()
 	s.persistAgent(&snapshot)
+	s.deliverKickoffs(name)
 	return Response{OK: true, Data: map[string]any{
 		"name":       name,
 		"agent_id":   snapshot.AgentID,
 		"expires_at": snapshot.ExpiresAt.Format(time.RFC3339),
 		"pubkey":     pubHex,
+		"role":       snapshot.Role,
 	}}
 }
 
@@ -356,6 +383,18 @@ func (s *State) opUnregister(req Request) Response {
 	if a == nil {
 		s.mu.Unlock()
 		return errorResponse(CodeNotFound, "not_registered", "run lesche register before unregister", "not registered: "+from, map[string]any{"from": from})
+	}
+	// Reject unregister if this agent is a supervisor with active (non-empty) plan assignments.
+	for pid, plan := range s.plans {
+		if plan.Supervisor != from {
+			continue
+		}
+		for _, asgn := range plan.Assignments {
+			if asgn.Status != statusMerged {
+				s.mu.Unlock()
+				return errorResponse(CodeSupervisorBusy, "supervisor_busy", "run lesche plan handoff <agent> first to transfer ownership", "supervisor still owns active assignments in project "+pid, map[string]any{"project": pid, "slug": asgn.Slug})
+			}
+		}
 	}
 	agentID := a.AgentID
 	s.unindexAgent(agentID)

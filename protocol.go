@@ -38,7 +38,8 @@ const (
 	// doesn't silently reuse the code for a new meaning.
 	CodeNotYourTurn  = 4
 	CodeNotFound     = 5
-	CodeUnauthorized = 6 // signature rejected or caller not registered
+	CodeUnauthorized    = 6 // signature rejected or caller not registered
+	CodeSupervisorBusy = 7 // supervisor still owns a non-empty plan; handoff first
 )
 
 func errorResponse(code int, reason, retryHint, message string, context map[string]any) Response {
