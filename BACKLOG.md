@@ -243,14 +243,13 @@ run `lesche protocol`. Full help: `lesche help`.
   `a907186`; not started. Needs rebase on new main before work begins.
 
 **Designed, not implemented (priority order):**
-- **I. `lesche init` + `lesche run` harness integration** (unassigned;
-  top of queue). Emit role-specific system-prompt files and spawn the
-  right harness with the prompt injected. Also renames "manager" →
-  "supervisor" across docs + the H workstream spec.
-- F. Structured error payloads (in flight on `feat/errors`; codex
-  rebasing post-A).
-- H. Plan primitive + supervisor/worker roles (unassigned;
-  sequenced after I to pick up the rename).
+- **I. `lesche init` + `lesche prompt` + `lesche run`** (assigned
+  copilot, top of queue). Role-specific onboarding prompts + harness
+  spawn wrappers. Also cascades "manager" → "supervisor" rename.
+- **H. Plan primitive + supervisor/worker roles** (assigned codex).
+  Parallel with I — zero file collision.
+- **J. Daemon-restart mailbox persistence** (assigned claude-code).
+  Parallel with I and H. Hot-path instrumentation.
 - Multi-project workspace isolation (no design yet).
 
 **Killed:**
@@ -521,6 +520,54 @@ cascade — edit in same commit, not a follow-up).
 Self-contained; good cold-start workstream — smaller surface than
 F or H. Doesn't collide with F (no overlap). Unblocks H (which
 needs the rename).
+
+### J. Daemon-restart mailbox persistence
+
+**Goal**: When the daemon restarts (binary install, crash, host
+reboot), pending unread messages in peer-channel and room mailboxes
+should survive. Today the git transcript is preserved but per-recipient
+unread state is in-memory only — any message not yet consumed by the
+recipient at restart time is lost from their inbox (though the git log
+still has it). This has cost us live-session messages twice in the
+current batch.
+
+**Scope**:
+- Persist mailbox deltas on every delivery path: `channel.tell`'s
+  mailbox append, `room.opPost`'s per-member mailbox append, and
+  their drop-oldest-on-overflow (room) events.
+- On consume (`channel.read`, `roomRead`), record the consumption so
+  the replay doesn't re-deliver already-read messages.
+- Storage: extend the SQLite queue with a `mailbox` table, or a new
+  sibling DB, keyed by `(recipient_name, channel_or_room_id, seq)`.
+  Call it during implementation — one table with a `kind` column is
+  simpler than two sibling stores.
+- On `newState()`, replay any undelivered rows into in-memory
+  mailboxes before the daemon starts accepting connections.
+- Cleanup: rows consumed by a `read` / `roomRead` are deleted from
+  the persistence table (they survived the transcript in git; no
+  need to keep them in the mailbox DB).
+
+**Files**: `queue.go` (new mailbox table + schema migration),
+`channel.go` (instrument `tell` deliver path + `read` consume path),
+`room.go` (same), `state.go` (hook replay into `newState()` before
+daemon listen), new tests exercising restart-survival.
+
+**Tests**:
+- `tell` → daemon restart → recipient `read` returns the message.
+- `post` → daemon restart → members' `read` returns the message.
+- `tell` → `read` → daemon restart → recipient's next `read` empty.
+- Overflow: drop-oldest behavior replays identically post-restart
+  (drop counter preserved).
+- Concurrent delivery + restart: no message lost, no duplicate
+  delivered.
+
+**Blockers**: None. Parallel-safe against I and H — I is pure client-
+side, H adds a new table but doesn't touch mailbox paths. Small
+collision with H on the write queue if H adds its own table, but
+both can live in the same SQLite DB additively.
+
+**Agent fit**: Warm agent. Touches the queue + delivery hot paths.
+Not a cold start.
 
 ### A. Identity refactor + nicknames
 
