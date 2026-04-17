@@ -124,6 +124,193 @@ func cmdAgents(_ []string) {
 	})
 }
 
+func cmdRooms(args []string) {
+	from := callerName(args)
+	if from == "" {
+		fmt.Fprintln(os.Stderr, "caller identity required (LESCHE_NAME or --as)")
+		os.Exit(1)
+	}
+	resp, err := request("rooms", map[string]any{"from": from})
+	handle(resp, err, func(data any) {
+		rows, ok := data.([]any)
+		if !ok || len(rows) == 0 {
+			return
+		}
+		for _, row := range rows {
+			m := row.(map[string]any)
+			fmt.Printf("%s\tmembers=%v\tmessages=%v\n", m["name"], m["members"], m["messages"])
+		}
+	})
+}
+
+func cmdRoom(args []string) {
+	if len(args) < 1 {
+		fmt.Fprintln(os.Stderr, "usage: lesche room create <name> [--desc <text>]")
+		os.Exit(1)
+	}
+	switch args[0] {
+	case "create":
+		if len(args) < 2 {
+			fmt.Fprintln(os.Stderr, "usage: lesche room create <name> [--desc <text>]")
+			os.Exit(1)
+		}
+		from := callerName(args)
+		if from == "" {
+			fmt.Fprintln(os.Stderr, "caller identity required (LESCHE_NAME or --as)")
+			os.Exit(1)
+		}
+		name := args[1]
+		desc := parseFlag(args, "--desc")
+		resp, err := request("room_create", map[string]any{"from": from, "name": name, "desc": desc})
+		handle(resp, err, func(data any) {
+			fmt.Println(data.(map[string]any)["name"])
+		})
+	default:
+		fmt.Fprintf(os.Stderr, "unknown room subcommand: %s\n", args[0])
+		os.Exit(1)
+	}
+}
+
+func cmdJoin(args []string) {
+	if len(args) < 1 {
+		fmt.Fprintln(os.Stderr, "usage: lesche join <room>")
+		os.Exit(1)
+	}
+	from := callerName(args)
+	if from == "" {
+		fmt.Fprintln(os.Stderr, "caller identity required (LESCHE_NAME or --as)")
+		os.Exit(1)
+	}
+	room := args[0]
+	resp, err := request("join", map[string]any{"from": from, "room": room})
+	handle(resp, err, nil)
+}
+
+func cmdLeave(args []string) {
+	if len(args) < 1 {
+		fmt.Fprintln(os.Stderr, "usage: lesche leave <room>")
+		os.Exit(1)
+	}
+	from := callerName(args)
+	if from == "" {
+		fmt.Fprintln(os.Stderr, "caller identity required (LESCHE_NAME or --as)")
+		os.Exit(1)
+	}
+	room := args[0]
+	resp, err := request("leave", map[string]any{"from": from, "room": room})
+	handle(resp, err, nil)
+}
+
+func cmdParticipants(args []string) {
+	if len(args) < 1 {
+		fmt.Fprintln(os.Stderr, "usage: lesche participants <room>")
+		os.Exit(1)
+	}
+	from := callerName(args)
+	if from == "" {
+		fmt.Fprintln(os.Stderr, "caller identity required (LESCHE_NAME or --as)")
+		os.Exit(1)
+	}
+	room := args[0]
+	resp, err := request("participants", map[string]any{"from": from, "room": room})
+	handle(resp, err, func(data any) {
+		m := data.(map[string]any)
+		rows, _ := m["members"].([]any)
+		for _, row := range rows {
+			p := row.(map[string]any)
+			fmt.Printf("%s\tpending=%v\tdropped=%v\n", p["name"], p["pending"], p["dropped"])
+		}
+	})
+}
+
+func cmdPost(args []string) {
+	if len(args) < 2 {
+		fmt.Fprintln(os.Stderr, "usage: lesche post <room> <msg>")
+		os.Exit(1)
+	}
+	from := callerName(args)
+	if from == "" {
+		fmt.Fprintln(os.Stderr, "caller identity required (LESCHE_NAME or --as)")
+		os.Exit(1)
+	}
+	room, body := args[0], args[1]
+	resp, err := request("post", map[string]any{"from": from, "room": room, "body": body})
+	handle(resp, err, func(data any) {
+		m := data.(map[string]any)
+		fmt.Printf("room=%s seq=%v\n", m["room"], m["seq"])
+	})
+}
+
+func cmdInbox(args []string) {
+	from := callerName(args)
+	if from == "" {
+		fmt.Fprintln(os.Stderr, "caller identity required (LESCHE_NAME or --as)")
+		os.Exit(1)
+	}
+	room := ""
+	if len(args) > 0 && args[0] != "--as" {
+		room = args[0]
+	}
+	req := map[string]any{"from": from}
+	if room != "" {
+		req["room"] = room
+	}
+	resp, err := request("inbox", req)
+	handle(resp, err, func(data any) {
+		if room != "" {
+			m := data.(map[string]any)
+			printRoomMessages(m["messages"])
+			return
+		}
+		rows, ok := data.([]any)
+		if !ok || len(rows) == 0 {
+			return
+		}
+		for _, row := range rows {
+			m := row.(map[string]any)
+			fmt.Printf("room=%s\n", m["room"])
+			printRoomMessages(m["messages"])
+		}
+	})
+}
+
+func cmdPeek(args []string) {
+	if len(args) < 1 {
+		fmt.Fprintln(os.Stderr, "usage: lesche peek <room>")
+		os.Exit(1)
+	}
+	from := callerName(args)
+	if from == "" {
+		fmt.Fprintln(os.Stderr, "caller identity required (LESCHE_NAME or --as)")
+		os.Exit(1)
+	}
+	room := args[0]
+	resp, err := request("peek", map[string]any{"from": from, "room": room})
+	handle(resp, err, func(data any) {
+		m := data.(map[string]any)
+		printRoomMessages(m["messages"])
+	})
+}
+
+func printRoomMessages(v any) {
+	msgs, _ := v.([]any)
+	for _, item := range msgs {
+		m, _ := item.(map[string]any)
+		if m == nil {
+			continue
+		}
+		if typ, _ := m["type"].(string); typ == "notice" {
+			fmt.Printf("[notice] %v\n", m["body"])
+			continue
+		}
+		if notice, _ := m["notice"].(bool); notice {
+			fmt.Printf("[notice] %v\n", m["body"])
+			continue
+		}
+		fmt.Printf("[%v %v %v] %v\n", m["seq"], m["ts"], m["from"], m["body"])
+	}
+}
+
 func cmdTunnel(args []string) {
 	if len(args) < 1 {
 		fmt.Fprintln(os.Stderr, "usage: lesche tunnel <peer>")

@@ -23,6 +23,7 @@ type State struct {
 	mu      sync.Mutex
 	agents  map[string]*Agent
 	tunnels map[string]*Tunnel
+	rooms   map[string]*Room
 
 	// state-level any-waiters: one per agent, 1-buffered
 	anyWaiter map[string]chan anyMsg
@@ -42,6 +43,7 @@ func newState() (*State, error) {
 	s := &State{
 		agents:    make(map[string]*Agent),
 		tunnels:   make(map[string]*Tunnel),
+		rooms:     make(map[string]*Room),
 		anyWaiter: make(map[string]chan anyMsg),
 		writes:    make(chan writeOp, 128),
 		stop:      make(chan struct{}),
@@ -125,10 +127,23 @@ func (s *State) sweep() {
 	for _, name := range expired {
 		delete(s.agents, name)
 	}
+	rooms := make([]*Room, 0, len(s.rooms))
+	for _, r := range s.rooms {
+		rooms = append(rooms, r)
+	}
 	s.mu.Unlock()
 
 	for _, t := range doomedTunnels {
 		t.close("peer lease expired")
+	}
+	expiredSet := make(map[string]struct{}, len(expired))
+	for _, name := range expired {
+		expiredSet[name] = struct{}{}
+	}
+	for _, r := range rooms {
+		if r.removeMembers(expiredSet) {
+			s.persistRoomMembers(r)
+		}
 	}
 	for _, name := range expired {
 		s.removeAgentFile(name)
@@ -185,6 +200,22 @@ func (s *State) dispatch(req Request) Response {
 		return s.opRegister(req)
 	case "agents":
 		return s.opAgents()
+	case "rooms":
+		return s.opRooms(req)
+	case "room_create", "room-create":
+		return s.opRoomCreate(req)
+	case "join":
+		return s.opJoin(req)
+	case "leave":
+		return s.opLeave(req)
+	case "participants":
+		return s.opParticipants(req)
+	case "post":
+		return s.opPost(req)
+	case "inbox":
+		return s.opInbox(req)
+	case "peek":
+		return s.opPeek(req)
 	case "sessions":
 		return s.opSessions(req)
 	case "history":

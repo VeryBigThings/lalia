@@ -10,6 +10,7 @@ func newFixtureState() *State {
 	return &State{
 		agents:    make(map[string]*Agent),
 		tunnels:   make(map[string]*Tunnel),
+		rooms:     make(map[string]*Room),
 		anyWaiter: make(map[string]chan anyMsg),
 		writes:    make(chan writeOp, 128),
 		stop:      make(chan struct{}),
@@ -213,5 +214,46 @@ func TestStateSweepExpiresAgentAndClosesTunnel(t *testing.T) {
 	await := tun.await("bob", 10*time.Millisecond)
 	if await.OK || await.Code != CodePeerClosed {
 		t.Fatalf("await after sweep-close should be peer_closed: %+v", await)
+	}
+}
+
+func TestStateSweepEvictsExpiredAgentsFromRooms(t *testing.T) {
+	t.Setenv("LESCHE_WORKSPACE", filepath.Join(t.TempDir(), "workspace"))
+	s := newFixtureState()
+	now := time.Now()
+
+	s.agents["alice"] = &Agent{Name: "alice", ExpiresAt: now.Add(-time.Second), LastSeenAt: now.Add(-time.Minute)}
+	s.agents["bob"] = &Agent{Name: "bob", ExpiresAt: now.Add(time.Hour), LastSeenAt: now}
+
+	room := newRoom("ops", "", "alice")
+	room.members["bob"] = true
+	s.rooms["ops"] = room
+
+	s.sweep()
+
+	s.mu.Lock()
+	_, aliceStill := s.agents["alice"]
+	_, bobStill := s.agents["bob"]
+	s.mu.Unlock()
+	if aliceStill {
+		t.Fatalf("alice should have expired and been removed from agents")
+	}
+	if !bobStill {
+		t.Fatalf("bob should still be active")
+	}
+
+	room.mu.Lock()
+	_, aliceMember := room.members["alice"]
+	_, bobMember := room.members["bob"]
+	room.mu.Unlock()
+	if aliceMember {
+		t.Fatalf("alice should have been evicted from room membership")
+	}
+	if !bobMember {
+		t.Fatalf("bob should remain in room membership")
+	}
+
+	if len(s.writes) == 0 {
+		t.Fatalf("expected sweep to queue MEMBERS.md persistence after eviction")
 	}
 }

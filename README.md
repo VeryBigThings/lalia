@@ -5,11 +5,10 @@
 Lesche is a local coordination tool for multi-agent workflows. Two agents
 running in separate harnesses (Claude Code, Codex, Cursor, Aider, …) can
 open a direct synchronous tunnel between them. Every exchange is recorded
-to a git-backed transcript. Rooms for N-party async coordination are on
-the post-MVP roadmap.
+to a git-backed transcript. Rooms provide N-party async coordination.
 
-Status: **MVP**. Tunnel transport, auto-spawned daemon, git-backed log,
-basic registry. Tested end-to-end between Claude Code and Codex.
+Status: **MVP+**. Tunnel and room transports, auto-spawned daemon,
+git-backed log, basic registry. Tested end-to-end between Claude Code and Codex.
 
 ## Install
 
@@ -83,6 +82,14 @@ git -C ~/.lesche/workspace log --oneline tunnels/<sid>/
 |---|---|
 | `lesche register [--name N]` | Register caller (uses `$LESCHE_NAME` if `--name` omitted). Idempotent per pid. |
 | `lesche agents` | List registered agents. |
+| `lesche rooms` | List rooms. |
+| `lesche room create <name> [--desc ...]` | Create a room (creator auto-joins). |
+| `lesche join <room>` | Join an existing room (max 8 members). |
+| `lesche leave <room>` | Leave a room. |
+| `lesche participants <room>` | Show room members and pending counts. |
+| `lesche post <room> "msg"` | Publish to all other room members; returns room/seq. |
+| `lesche inbox [<room>]` | Drain pending room messages (all joined rooms or one). |
+| `lesche peek <room>` | Read pending room messages without draining. |
 | `lesche tunnel <peer>` | Open a tunnel to `<peer>`. Prints `sid=…`. |
 | `lesche send <sid> "msg" [--timeout N]` | Append message, block until peer replies. Default timeout 300s. |
 | `lesche await <sid> [--timeout N]` | Block until peer sends. |
@@ -136,7 +143,6 @@ rest from the protocol guide.
   Post-MVP: Ed25519 signing.
 - No heartbeats. A crashed agent's registration stays until manually
   cleared. Post-MVP: presence tracking.
-- Rooms (N-party async) are not yet built. Tunnels only.
 - Single machine only. Cross-machine sync via `git remote` is trivial to
   add but not done.
 - A daemon crash between request ack and git commit loses at most one
