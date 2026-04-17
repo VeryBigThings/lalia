@@ -1,6 +1,6 @@
-# Lesche — Coordinator Notes
+# Lesche — Supervisor Notes
 
-If you're reading this, a human or the coordinator agent just handed
+If you're reading this, a human or the supervisor agent just handed
 you a workstream. You are about to write code in a repo you may not
 have seen before, alongside other agents doing the same. This file
 is the single source of truth for:
@@ -58,13 +58,13 @@ files on top of this.
 
 After reading: identify **which files your workstream is going to
 touch**, cross-check them against the heat map, and if you see
-collisions announce them via `tell claude-coordinator "..."` before
+collisions announce them via `tell supervisor "..."` before
 writing.
 
 ## Coordination default: rooms for feature work
 
 For any active feature/workstream, coordination happens in a room
-named after the slug (`feat/identity`, `feat/errors`, …). Manager
+named after the slug (`feat/identity`, `feat/errors`, …). Supervisor
 and assigned worker are members; other agents (reviewers, future
 inheritors, onlookers needing context) can join to peek. The room's
 git transcript survives session kills — kill a harness, come back
@@ -75,7 +75,7 @@ private 1:1 problem-solving, identity questions, anything the rest
 of the project genuinely shouldn't see. If the conversation is about
 a specific workstream, it probably belongs in the slug's room.
 
-Today this is manual — the manager runs `lesche room create <slug>`
+Today this is manual — the supervisor runs `lesche room create <slug>`
 then `lesche join <slug>` and tells the worker to join. Workstream H
 will automate it (rooms auto-created by `plan assign`, owner auto-
 joined on `plan claim`).
@@ -83,8 +83,8 @@ joined on `plan claim`).
 ## If you are a worker agent — bootstrap
 
 You are a worker if the human told you "you are a worker" or
-assigned you a specific branch/workstream. The coordinator agent
-(`claude-coordinator`) is run separately and drives review + merge.
+assigned you a specific branch/workstream. The supervisor agent
+(`supervisor`) is run separately and drives review + merge.
 
 ### 1. Identity
 
@@ -101,10 +101,10 @@ Set it once per shell:
 export LESCHE_NAME=<your-name>
 ```
 
-Do not invent a new name. Do not use `claude`, `claude-coordinator`,
-`sonnet`, or any variant — those either collide with the coordinator
+Do not invent a new name. Do not use `claude`, `supervisor`,
+`sonnet`, or any variant — those either collide with the supervisor
 or are reserved. If your harness has already been handed a different
-name by the human, use that instead and tell the coordinator in your
+name by the human, use that instead and tell the supervisor in your
 first message.
 
 ### 2. Register
@@ -119,13 +119,13 @@ lesche register
 lesche agents                  # sanity-check: see who else is online
 ```
 
-If you see `claude-coordinator` in the agents list, the coordinator
+If you see `supervisor` in the agents list, the supervisor
 is up and expecting you. If not, wait and re-run `lesche agents`
 every minute or so until it shows up.
 
 ### 3. Announce yourself
 
-Tell the coordinator, in one message, exactly these things:
+Tell the supervisor, in one message, exactly these things:
 
 - Your harness (`copilot` / `codex` / `claude-code`).
 - The workstream you were assigned (or "unassigned, awaiting
@@ -136,20 +136,20 @@ Tell the coordinator, in one message, exactly these things:
   for `feat/identity`).
 
 ```
-lesche tell claude-coordinator "harness: codex. assigned feat/keychain. BACKLOG.md read. no blockers."
+lesche tell supervisor "harness: codex. assigned feat/keychain. BACKLOG.md read. no blockers."
 ```
 
-No tunnel to open, no sid to track. Your channel with the coordinator
+No tunnel to open, no sid to track. Your channel with the supervisor
 is implicit on the first `tell`.
 
-### 4. Receive messages from the coordinator
+### 4. Receive messages from the supervisor
 
-The coordinator may send you a message before you send one to them.
+The supervisor may send you a message before you send one to them.
 To receive anything arriving on any channel or room you're in:
 
 ```
 lesche read-any --timeout 300
-# prints kind=peer target=claude-coordinator (or kind=room target=…)
+# prints kind=peer target=supervisor (or kind=room target=…)
 # then the message body
 ```
 
@@ -157,19 +157,19 @@ lesche read-any --timeout 300
 Reply to a peer with:
 
 ```
-lesche tell claude-coordinator "<your reply>"
+lesche tell supervisor "<your reply>"
 ```
 
 Or if you want to pull from just one specific peer:
 
 ```
-lesche read claude-coordinator --timeout 300
+lesche read supervisor --timeout 300
 ```
 
 Need a synchronous question-and-answer in one call? Use `ask`:
 
 ```
-lesche ask claude-coordinator "can I rebase on main now?" --timeout 60
+lesche ask supervisor "can I rebase on main now?" --timeout 60
 ```
 
 `ask` sends, then blocks for the peer's next message and prints it
@@ -186,7 +186,7 @@ immediately. Two habits that prevent this:
 
 ### 6. Announce key moments
 
-`tell claude-coordinator` at these checkpoints:
+`tell supervisor` at these checkpoints:
 
 - **Start of work** — confirmed in step 3.
 - **Open question in your scope entry** — don't guess; use `ask`.
@@ -203,14 +203,14 @@ Worker session template; safe to run verbatim after step 1:
 ```
 export LESCHE_NAME=<your-name>
 lesche register
-lesche agents | grep claude-coordinator || echo "coordinator not up"
+lesche agents | grep supervisor || echo "supervisor not up"
 lesche channels                       # who do I already have a channel with?
-lesche peek claude-coordinator        # anything pending?
+lesche peek supervisor        # anything pending?
 lesche read-any --timeout 60          # or block for the first inbound
 ```
 
 If `read-any` times out and `peek` shows nothing, push first with
-`tell claude-coordinator "..."` per step 3.
+`tell supervisor "..."` per step 3.
 
 ## How to coordinate (general)
 
@@ -243,13 +243,13 @@ run `lesche protocol`. Full help: `lesche help`.
   `a907186`; not started. Needs rebase on new main before work begins.
 
 **Designed, not implemented (priority order):**
-- **I. `lesche init` + `lesche prompt` + `lesche run`** (assigned
-  copilot, top of queue). Role-specific onboarding prompts + harness
-  spawn wrappers. Also cascades "manager" → "supervisor" rename.
-- **H. Plan primitive + supervisor/worker roles** (assigned codex).
+- **I. `lesche init` + `lesche prompt` + `lesche run`** (unclaimed,
+  top of queue). Role-specific onboarding prompts + harness spawn
+  wrappers.
+- **H. Plan primitive + supervisor/worker roles** (unclaimed).
   Parallel with I — zero file collision.
-- **J. Daemon-restart mailbox persistence** (assigned claude-code).
-  Parallel with I and H. Hot-path instrumentation.
+- **J. Daemon-restart mailbox persistence** (unclaimed). Parallel
+  with I and H. Hot-path instrumentation.
 - Multi-project workspace isolation (no design yet).
 
 **Killed:**
@@ -281,7 +281,7 @@ Read the "Cold-start reading list" section above plus your workstream's
 extras from "Per-workstream reading list" below before writing code.
 
 Merge gate unchanged: `make test` passing + human approval via
-`tell claude-coordinator "ready for review: ..."`.
+`tell supervisor "ready for review: ..."`.
 
 ### Settled in prior batches
 
@@ -312,8 +312,8 @@ Read this after the cold-start list above, before writing code.
 6. Open question before you start: **nickname storage location**.
    `docs/IDENTITY.md` proposes `~/.lesche/nicknames.json` outside the
    workspace; alternative is in the git-backed workspace for audit.
-   Raise this in your kickoff message to `claude-coordinator`
-   (e.g. `ask claude-coordinator "nickname storage: home or workspace?"`).
+   Raise this in your kickoff message to `supervisor`
+   (e.g. `ask supervisor "nickname storage: home or workspace?"`).
 
 **F. Structured error payloads (`codex`, `feat/errors`)**
 
@@ -363,7 +363,7 @@ available workstream. Read the cold-start list above first, then:
 No `protocol.go`, no `state.go`, no `channel.go`, no `room.go`
 changes. Your footprint is `signing.go` + one new file + a help
 paragraph. If you find yourself editing anything else, stop and
-`ask claude-coordinator`.
+`ask supervisor`.
 
 Everyone: before writing, run `lesche protocol` to see the
 agent-facing guide verbatim, and `make test` to confirm the baseline
@@ -371,7 +371,7 @@ suite (32 tests, ~2.2s) is green on your branch.
 
 Each agent owns its branch end-to-end (code + tests + docs + help
 updates). Merge gate is `make test` passing plus human approval via
-`tell claude-coordinator "ready for review: ..."`.
+`tell supervisor "ready for review: ..."`.
 
 ### Settled design notes from the first batch
 
@@ -385,7 +385,7 @@ updates). Merge gate is `make test` passing plus human approval via
 3. **Nickname storage location** still open; pick before feat/identity
    starts. `docs/IDENTITY.md` proposes `~/.lesche/nicknames.json` (outside
    workspace). Alternative: in the workspace for git audit. Copilot
-   should `ask claude-coordinator` on kickoff.
+   should `ask supervisor` on kickoff.
 
 ## Parallelization principles
 
@@ -399,7 +399,7 @@ updates). Merge gate is `make test` passing plus human approval via
    Agents do not `make install` from a feature branch except on their
    own isolated `LESCHE_HOME`.
 4. **Coordination happens through lesche.** Agents announce start of
-   work and report completion by `tell claude-coordinator "..."`.
+   work and report completion by `tell supervisor "..."`.
    Real-time questions use the same channel via `ask` or `tell`.
 5. **Merge gate is a human decision** (for now — the user). Agent
    reports "ready for review" over lesche; human merges when
@@ -461,9 +461,6 @@ prompt content underneath:
   the harness's preferred location and exec the harness with args
   forwarded.
 
-Also: cascade the manager → supervisor rename through docs and
-workstream H's spec before H starts.
-
 **Scope**:
 - New commands: `lesche init`, `lesche prompt`, `lesche run`, each
   with `worker` | `supervisor` subcommand.
@@ -487,16 +484,9 @@ workstream H's spec before H starts.
     with a heading marker) `.github/copilot-instructions.md`, then
     exec `copilot "$@"`. Require `--force` to overwrite an existing
     file without a lesche marker.
-- Rename cascade: every occurrence of "manager" in BACKLOG.md and
-  workstream H's catalog entry becomes "supervisor". The
-  `ManagerBusy` error code reserved slot in H becomes `SupervisorBusy`.
-  The agent name `claude-coordinator` stays — coordinator is a
-  name, not a role; roles are a separate axis.
-
 **Files**: new `prompts/worker.md`, new `prompts/supervisor.md`, new
-`run.go` (exec-wrapper), `client.go` (cmdInit, cmdRun), `main.go`
-(dispatch), `help.go` (document both commands), `BACKLOG.md` (rename
-cascade — edit in same commit, not a follow-up).
+`run.go` (exec-wrapper), `client.go` (cmdInit, cmdPrompt, cmdRun),
+`main.go` (dispatch), `help.go` (document the commands).
 
 **Tests**:
 - `lesche init worker` stdout matches embedded file byte-for-byte.
@@ -518,8 +508,7 @@ cascade — edit in same commit, not a follow-up).
 
 **Agent fit**: Any agent that can write Go and a few test cases.
 Self-contained; good cold-start workstream — smaller surface than
-F or H. Doesn't collide with F (no overlap). Unblocks H (which
-needs the rename).
+F or H. Doesn't collide with F, H, or J.
 
 ### J. Daemon-restart mailbox persistence
 
@@ -623,20 +612,20 @@ behavior when backend is unavailable.
 **Agent fit**: Self-contained. Works for any agent that can read
 `signing.go`.
 
-### H. Plan primitive + manager/worker roles
+### H. Plan primitive + supervisor/worker roles
 
 **Goal**: Replace this markdown file as the source of truth for
 assignments. Move the assignment table into a git-backed `plan.json`
 per project, mutable via `lesche plan …` commands. Introduce a role
-axis on Agent (manager vs worker) so the daemon knows who can mutate
+axis on Agent (supervisor vs worker) so the daemon knows who can mutate
 what. BACKLOG.md stays for rationale, rules of engagement, cold-
 start reading — it stops holding live state.
 
 **Scope** (decisions already made, see conversation log):
-- Roles set at `register --role worker|manager`. Stored on Agent.
+- Roles set at `register --role worker|supervisor`. Stored on Agent.
   No cross-agent privilege beyond command-surface gating.
-- One manager per project. Unregister rejects (`ManagerBusy`) if the
-  manager still owns a non-empty plan; must `plan handoff <agent>`
+- One supervisor per project. Unregister rejects (`SupervisorBusy`) if the
+  supervisor still owns a non-empty plan; must `plan handoff <agent>`
   first.
 - Project id auto-derived: `git remote get-url origin` slugified;
   fallback to repo basename when no remote.
@@ -645,19 +634,19 @@ start reading — it stops holding live state.
 - Assignment shape: `{slug, goal, worktree, owner, status,
   kickoff, kickoff_delivered, updated_at}` with status ∈ `open |
   assigned | in-progress | ready | blocked | merged`.
-- Manager-only mutations: `plan create <goal>`, `plan assign <slug>
+- Supervisor-only mutations: `plan create <goal>`, `plan assign <slug>
   <agent> --worktree <path> --goal "..." [--kickoff "..."]`,
-  `plan unassign <slug>`, `plan handoff <new-manager>`. `assign`
-  verifies the worktree path exists on the manager's machine before
+  `plan unassign <slug>`, `plan handoff <new-supervisor>`. `assign`
+  verifies the worktree path exists on the supervisor's machine before
   writing.
 - Worker self-service: `plan status <slug> in-progress|ready|blocked`
   flips the caller's own row only; daemon rejects writes to a row
   the caller does not own. `plan claim <slug>` verifies worktree
   exists on caller's machine, sets owner=self, status=in-progress.
 - Anyone can read: `plan show [--project <id>]` defaults to cwd's
-  project; `plan list` returns plans where caller is manager or owner.
+  project; `plan list` returns plans where caller is supervisor or owner.
 - **Assignment-scoped rooms**: `plan assign` auto-creates a room
-  named after the slug, auto-joins manager + owner. All coordination
+  named after the slug, auto-joins supervisor + owner. All coordination
   about the assignment happens there so context survives session
   kills (git transcript, unbounded history). `plan handoff` rewires
   room membership. Setting status to `merged` archives the room
@@ -668,9 +657,9 @@ start reading — it stops holding live state.
   `--kickoff`, the text is stored on the assignment with
   `kickoff_delivered=false`. When the owner next calls `register`,
   `opRegister` scans plans, finds undelivered kickoffs for this
-  agent, synthesizes a post from the manager into the assignment
+  agent, synthesizes a post from the supervisor into the assignment
   room, and flips `kickoff_delivered=true`. Idempotent on
-  re-register. Solves "manager wants to assign work before the
+  re-register. Solves "supervisor wants to assign work before the
   worker harness is up" without weakening the `tell`
   invariant that peers must be registered.
 
@@ -678,12 +667,12 @@ start reading — it stops holding live state.
 project-id resolver), `state.go` (new ops + role-gated dispatch
 checks), `registry.go` (Role field on Agent, persist), `client.go`
 (cmdPlan* subcommands), `main.go` (dispatch), `help.go` (document),
-`protocol.go` (new error code `ManagerBusy`, additive), new tests.
+`protocol.go` (new error code `SupervisorBusy`, additive), new tests.
 
 **Tests**: role persists across re-register; worker cannot mutate
-other workers' rows; worker can flip own status; manager cannot be
+other workers' rows; worker can flip own status; supervisor cannot be
 unregistered while holding a non-empty plan; handoff atomically
-transfers manager rights (including room membership); project id
+transfers supervisor rights (including room membership); project id
 derivation from remote vs repo-basename; plan file round-trips
 through git; assign auto-creates a room with the right members;
 merged status archives the room to read-only; kickoff is delivered
@@ -731,15 +720,20 @@ handlers.
 
 ## Sequencing after the current batch
 
-A and E merged. F is in flight (codex, rebasing post-A). Next queue:
+A, E, F merged. Three parallel workstreams open (I, H, J); worktrees,
+rooms, and WORKER_TASK.md briefs in place, awaiting worker claim.
 
-1. **I. `lesche init` + `lesche run`** — top of queue. Self-contained,
-   no daemon touch, unblocks H by cascading the supervisor rename.
-2. **H. Plan primitive + supervisor/worker roles** — sequenced after I
-   so H inherits the supervisor vocabulary instead of introducing then
-   renaming it.
-3. **Multi-project workspace isolation** — one daemon, many repos, no
-   collision. No design doc yet; draft one when starting the batch.
+1. **I. `lesche init` + `lesche prompt` + `lesche run`** — room
+   `feat-init-run`, branch `feat/init-run`. Self-contained, no
+   daemon touch.
+2. **H. Plan primitive + supervisor/worker roles** — room
+   `feat-plan`, branch `feat/plan`. Daemon-heavy; parallel-safe
+   with I and J.
+3. **J. Daemon-restart mailbox persistence** — room
+   `feat-mailbox-persist`, branch `feat/mailbox-persist`. Hot-path
+   instrumentation; parallel-safe with I and H.
+4. **Multi-project workspace isolation** — no design doc yet; draft
+   when the next batch opens.
 
 ## Rules of engagement
 
@@ -751,11 +745,11 @@ A and E merged. F is in flight (codex, rebasing post-A). Next queue:
    batch. If you are not F, add fields additively only. F is allowed
    to rework `Response`.
 4. **If you need to touch a file outside your heat-map column**,
-   stop and `tell claude-coordinator "..."` to check for collisions
+   stop and `tell supervisor "..."` to check for collisions
    before writing.
-5. **When done, `tell claude-coordinator` and report**: branch name,
+5. **When done, `tell supervisor` and report**: branch name,
    commit SHA, `make test` output summary, any bugs found-but-not-
-   fixed, any new env vars or commands added. Coordinator will
+   fixed, any new env vars or commands added. Supervisor will
    either approve-for-merge or flag issues for another round.
 6. **Rebase before merge.** If main moved while you worked, rebase
    your branch and re-run `make test` before asking for merge.
