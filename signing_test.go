@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"os"
+	"os/exec"
 	"strings"
 	"testing"
 )
@@ -146,5 +147,190 @@ func TestSigningNonRegisteredCallerUnauthorized(t *testing.T) {
 	}
 	if !strings.Contains(resp.Error, "not registered") {
 		t.Fatalf("expected not registered error, got: %q", resp.Error)
+	}
+}
+
+// TestKeystoreFileRoundTrip verifies that the file backend saves and reloads
+// a private key without corruption.
+func TestKeystoreFileRoundTrip(t *testing.T) {
+	base := t.TempDir()
+	t.Setenv("LESCHE_HOME", base)
+	t.Setenv("LESCHE_KEYSTORE", "")
+
+	_, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("generate key: %v", err)
+	}
+	ks := &fileKeystore{}
+	if err := ks.Save("roundtrip", priv); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	loaded, err := ks.Load("roundtrip")
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if !bytes.Equal([]byte(priv), []byte(loaded)) {
+		t.Fatalf("loaded key differs from saved key")
+	}
+}
+
+// TestKeystoreKeychainRoundTrip tests the macOS Keychain backend.
+// Skipped when the 'security' CLI is unavailable (Linux CI, non-macOS).
+func TestKeystoreKeychainRoundTrip(t *testing.T) {
+	if newKeychainBackend() == nil {
+		t.Skip("keychain backend unavailable on this platform")
+	}
+	name := "lesche-keystore-test-roundtrip"
+	t.Cleanup(func() {
+		exec.Command("security", "delete-generic-password", "-s", keychainService, "-a", name).Run() //nolint
+	})
+
+	_, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("generate key: %v", err)
+	}
+	ks := newKeychainBackend()
+	if err := ks.Save(name, priv); err != nil {
+		t.Fatalf("keychain save: %v", err)
+	}
+	loaded, err := ks.Load(name)
+	if err != nil {
+		t.Fatalf("keychain load: %v", err)
+	}
+	if !bytes.Equal([]byte(priv), []byte(loaded)) {
+		t.Fatalf("loaded key differs from saved key")
+	}
+}
+
+// TestKeystoreKeychainUpdate verifies that saving over an existing keychain
+// item replaces it (the -U flag to security add-generic-password).
+func TestKeystoreKeychainUpdate(t *testing.T) {
+	if newKeychainBackend() == nil {
+		t.Skip("keychain backend unavailable on this platform")
+	}
+	name := "lesche-keystore-test-update"
+	t.Cleanup(func() {
+		exec.Command("security", "delete-generic-password", "-s", keychainService, "-a", name).Run() //nolint
+	})
+
+	_, priv1, _ := ed25519.GenerateKey(rand.Reader)
+	_, priv2, _ := ed25519.GenerateKey(rand.Reader)
+	ks := newKeychainBackend()
+
+	if err := ks.Save(name, priv1); err != nil {
+		t.Fatalf("first save: %v", err)
+	}
+	if err := ks.Save(name, priv2); err != nil {
+		t.Fatalf("second save: %v", err)
+	}
+	loaded, err := ks.Load(name)
+	if err != nil {
+		t.Fatalf("load after update: %v", err)
+	}
+	if !bytes.Equal([]byte(priv2), []byte(loaded)) {
+		t.Fatalf("expected updated key, got stale one")
+	}
+}
+
+// TestKeystoreKeychainFallbackToFile verifies that when LESCHE_KEYSTORE=keychain
+// but the keychain backend is unavailable, newKeystore() returns a fileKeystore.
+// This test only runs on platforms where the keychain backend is absent.
+func TestKeystoreKeychainFallbackToFile(t *testing.T) {
+	if newKeychainBackend() != nil {
+		t.Skip("keychain backend available; fallback path not exercised here")
+	}
+	base := t.TempDir()
+	t.Setenv("LESCHE_HOME", base)
+	t.Setenv("LESCHE_KEYSTORE", "keychain")
+
+	ks := newKeystore()
+	if _, ok := ks.(*fileKeystore); !ok {
+		t.Fatalf("expected file backend fallback, got %T", ks)
+	}
+}
+
+// TestKeystoreEnsureKeyUsesKeychain confirms that ensureKey round-trips
+// through the keychain backend when LESCHE_KEYSTORE=keychain.
+func TestKeystoreEnsureKeyUsesKeychain(t *testing.T) {
+	if newKeychainBackend() == nil {
+		t.Skip("keychain backend unavailable on this platform")
+	}
+	name := "lesche-keystore-test-ensurekey"
+	t.Cleanup(func() {
+		exec.Command("security", "delete-generic-password", "-s", keychainService, "-a", name).Run() //nolint
+	})
+	t.Setenv("LESCHE_KEYSTORE", "keychain")
+
+	pub1, priv1, err := ensureKey(name)
+	if err != nil {
+		t.Fatalf("first ensureKey: %v", err)
+	}
+	pub2, priv2, err := ensureKey(name)
+	if err != nil {
+		t.Fatalf("second ensureKey: %v", err)
+	}
+	if hex.EncodeToString(pub1) != hex.EncodeToString(pub2) {
+		t.Fatalf("pubkey changed across re-ensureKey via keychain")
+	}
+	if !bytes.Equal([]byte(priv1), []byte(priv2)) {
+		t.Fatalf("privkey changed across re-ensureKey via keychain")
+	}
+}
+
+// TestKeystoreFileDelete verifies that Delete removes the key file and that
+// a subsequent Load returns an error.
+func TestKeystoreFileDelete(t *testing.T) {
+	base := t.TempDir()
+	t.Setenv("LESCHE_HOME", base)
+	t.Setenv("LESCHE_KEYSTORE", "")
+
+	_, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("generate key: %v", err)
+	}
+	ks := &fileKeystore{}
+	if err := ks.Save("todelete", priv); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	if err := ks.Delete("todelete"); err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+	if _, err := ks.Load("todelete"); err == nil {
+		t.Fatal("expected error loading deleted key, got nil")
+	}
+	// Second delete of missing key must be a no-op.
+	if err := ks.Delete("todelete"); err != nil {
+		t.Fatalf("second delete (no-op) returned error: %v", err)
+	}
+}
+
+// TestKeystoreKeychainDelete verifies that the keychain backend deletes an
+// item and that a subsequent Load returns an error.
+func TestKeystoreKeychainDelete(t *testing.T) {
+	if newKeychainBackend() == nil {
+		t.Skip("keychain backend unavailable on this platform")
+	}
+	name := "lesche-keystore-test-delete"
+	t.Cleanup(func() {
+		exec.Command("security", "delete-generic-password", "-s", keychainService, "-a", name).Run() //nolint
+	})
+
+	_, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("generate key: %v", err)
+	}
+	ks := newKeychainBackend()
+	if err := ks.Save(name, priv); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	if err := ks.Delete(name); err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+	if _, err := ks.Load(name); err == nil {
+		t.Fatal("expected error loading deleted keychain item, got nil")
+	}
+	// Second delete of missing item must be a no-op.
+	if err := ks.Delete(name); err != nil {
+		t.Fatalf("second delete (no-op) returned error: %v", err)
 	}
 }

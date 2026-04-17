@@ -6,15 +6,12 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"os"
 	"path/filepath"
 	"sort"
 )
 
-// keyDir is where per-agent private keys live. Deliberately outside the
-// workspace so they are not committed to git and can be placed outside
-// the agent-harness deny list (agents must be able to read their own
-// key to sign).
+// keyDir is where per-agent private keys live when using the file backend.
+// Deliberately outside the workspace so keys are not committed to git.
 func keyDir() string {
 	return filepath.Join(leschDir(), "keys")
 }
@@ -23,54 +20,34 @@ func keyPath(name string) string {
 	return filepath.Join(keyDir(), name+".key")
 }
 
-// ensureKey generates an Ed25519 keypair for `name` if one does not
-// already exist on disk. Returns (pub, priv) as raw bytes.
-// If a key already exists, it is loaded and returned unchanged.
+// ensureKey returns an existing key or generates a new one, using the active
+// keystore backend (file by default; keychain when LESCHE_KEYSTORE=keychain).
 func ensureKey(name string) (ed25519.PublicKey, ed25519.PrivateKey, error) {
-	p := keyPath(name)
-	if b, err := os.ReadFile(p); err == nil {
-		if len(b) != ed25519.PrivateKeySize {
-			return nil, nil, fmt.Errorf("key %s malformed: length %d", p, len(b))
-		}
-		priv := ed25519.PrivateKey(b)
-		pub := priv.Public().(ed25519.PublicKey)
-		return pub, priv, nil
-	} else if !os.IsNotExist(err) {
-		return nil, nil, err
+	ks := newKeystore()
+	priv, err := ks.Load(name)
+	if err == nil {
+		return priv.Public().(ed25519.PublicKey), priv, nil
 	}
-	if err := os.MkdirAll(keyDir(), 0700); err != nil {
-		return nil, nil, err
-	}
+	// Key not found — generate a new one.
 	pub, priv, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
 		return nil, nil, err
 	}
-	if err := os.WriteFile(p, priv, 0600); err != nil {
-		return nil, nil, err
+	if err := ks.Save(name, priv); err != nil {
+		return nil, nil, fmt.Errorf("save key for %s: %w", name, err)
 	}
 	return pub, priv, nil
 }
 
-// removeKey deletes an agent's private key file. No-op if missing.
+// removeKey deletes an agent's private key via the active keystore. No-op if missing.
 func removeKey(name string) error {
-	err := os.Remove(keyPath(name))
-	if err != nil && !os.IsNotExist(err) {
-		return err
-	}
-	return nil
+	return newKeystore().Delete(name)
 }
 
-// loadPrivateKey loads an agent's private key from disk. Used by the
-// client side to sign outgoing requests.
+// loadPrivateKey loads an agent's private key via the active keystore.
+// Used by the client side to sign outgoing requests.
 func loadPrivateKey(name string) (ed25519.PrivateKey, error) {
-	b, err := os.ReadFile(keyPath(name))
-	if err != nil {
-		return nil, err
-	}
-	if len(b) != ed25519.PrivateKeySize {
-		return nil, fmt.Errorf("malformed key at %s", keyPath(name))
-	}
-	return ed25519.PrivateKey(b), nil
+	return newKeystore().Load(name)
 }
 
 // canonicalArgs returns a deterministic JSON encoding of a request's
