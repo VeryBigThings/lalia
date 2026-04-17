@@ -39,7 +39,7 @@ Session start:
     lesche channels            # your active peer-pair channels
     lesche rooms               # known rooms
 
-Lease is 30 minutes; any command renews. If you go idle longer, you
+Lease is 60 minutes; any command renews. If you go idle longer, you
 get dropped and in-flight reads return immediately. "lesche renew"
 extends without doing anything else.
 

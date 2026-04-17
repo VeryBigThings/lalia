@@ -157,7 +157,7 @@ on stdout.
 
 ### 5. Keep your lease alive
 
-Leases are 30 minutes; any command renews. If your harness sits idle
+Leases are 60 minutes; any command renews. If your harness sits idle
 for longer than that, you get dropped and any blocking read returns
 immediately. Two habits that prevent this:
 
@@ -210,7 +210,7 @@ run `./lesche protocol`. Full help: `./lesche help`.
   arrival). Merged at `e4e7186`, adjusted in channels redesign.
 - SQLite write queue (crash-safe message persistence, WAL mode,
   dead-letter after 3 failed commits). Merged at `d113b02`.
-- Registry with persisted JSON, 30-minute lease + renew, workspace at
+- Registry with persisted JSON, 60-minute lease + renew, workspace at
   `~/.local/state/lesche/workspace` (outside harness allowlists).
 - Ed25519 signed requests for every authenticated op.
 - Install pipeline: `make install` places binary on `$PATH`.
@@ -260,7 +260,7 @@ Merge gate unchanged: `make test` passing + human approval via
 
 ### Settled in prior batches
 
-- Lease TTL raised to 30 minutes (was 10). Still skips renewal on
+- Lease TTL raised to 60 minutes (was 10, then 30). Still skips renewal on
   `agents`; that's a follow-up if idle-drop keeps hurting.
 - Channels redesign shipped (workstream G). See `CHANNELS.md` for
   the plan document, kept as historical context. Current behavior is

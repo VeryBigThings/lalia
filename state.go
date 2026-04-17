@@ -16,7 +16,7 @@ type Agent struct {
 }
 
 // Lease duration. Any command from the agent renews; sweeper drops expired.
-const leaseTTL = 30 * time.Minute
+const leaseTTL = 60 * time.Minute
 const sweepInterval = 30 * time.Second
 
 type State struct {
