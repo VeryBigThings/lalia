@@ -8,7 +8,6 @@ import (
 	"net"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strconv"
 	"syscall"
 	"time"
@@ -662,30 +661,16 @@ func cmdInit(args []string) {
 }
 
 func cmdPrompt(args []string) {
-	if len(args) < 1 {
-		fmt.Fprintln(os.Stderr, "usage: kopos prompt <worker|supervisor> [--force]")
+	if len(args) != 1 {
+		fmt.Fprintln(os.Stderr, "usage: kopos prompt <worker|supervisor>")
 		os.Exit(1)
 	}
-	role := args[0]
-	force := parseBoolFlag(args[1:], "--force")
-
-	prompt, err := promptForRole(role)
+	prompt, err := promptForRole(args[0])
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
-
-	cwd, err := os.Getwd()
-	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
-	}
-	path := filepath.Join(cwd, "KOPOS.md")
-	if err := writeManagedPromptFile(path, prompt, force); err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
-	}
-	fmt.Println(path)
+	fmt.Print(prompt)
 }
 
 func cmdRun(args []string) {

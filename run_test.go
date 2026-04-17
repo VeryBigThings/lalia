@@ -21,7 +21,10 @@ func TestInitWorkerMatchesEmbeddedPrompt(t *testing.T) {
 	}
 }
 
-func TestPromptWritesKOPOSAndRespectsOverwriteMarker(t *testing.T) {
+// writeManagedPromptFile is the helper used by `kopos run` to drop the role
+// prompt into a harness instructions file. `kopos prompt` no longer writes —
+// this test exercises the helper directly.
+func TestWriteManagedPromptFileRespectsOverwriteMarker(t *testing.T) {
 	dir := t.TempDir()
 	t.Chdir(dir)
 

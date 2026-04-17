@@ -94,8 +94,7 @@ Rooms (N-party):
 
 Usage:
   kopos init <worker|supervisor>       print role bootstrap prompt to stdout
-  kopos prompt <worker|supervisor> [--force]
-                                        write ./KOPOS.md bootstrap prompt
+  kopos prompt <worker|supervisor>     alias of init — print prompt to stdout
   kopos run <worker|supervisor> --claude-code [args...]
   kopos run <worker|supervisor> --codex       [args...]
   kopos run <worker|supervisor> --copilot     [--force] [args...]
@@ -137,9 +136,12 @@ Plan (supervisor/worker roles):
   kopos protocol                        print agent-facing protocol guide
   kopos --version
 
-Prompt/run safety:
-  Overwrite is refused when an existing instructions file does not carry
-  a kopos marker. Pass --force to override where supported.
+Run safety:
+  "kopos run" writes the role prompt into the harness's instructions file
+  (KOPOS.md, AGENTS.md, or .github/copilot-instructions.md). Overwrite is
+  refused when that file already exists and does not carry a kopos marker.
+  Pass --force to override. "kopos prompt" and "kopos init" never touch
+  the filesystem — they print the prompt to stdout.
 
 Identity:
   On register, kopos generates an Ed25519 keypair for your name and assigns

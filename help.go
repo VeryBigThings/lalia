@@ -9,11 +9,13 @@ first call. Running "kopos protocol" prints this message.
 
 kopos can scaffold role instructions for common harnesses:
 
-    kopos init worker|supervisor
-    kopos prompt worker|supervisor [--force]
+    kopos init worker|supervisor       # print prompt to stdout
+    kopos prompt worker|supervisor     # alias of init (stdout)
     kopos run worker|supervisor --claude-code|--codex|--copilot [args...]
 
 These helpers are optional wrappers around the same role prompt content.
+Only "kopos run" writes a file (into the harness's instructions path);
+"init" and "prompt" never touch the filesystem.
 
 ## Mental model
 
