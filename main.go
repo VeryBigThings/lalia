@@ -5,12 +5,19 @@ import (
 	"os"
 )
 
+// version is stamped at build time via -ldflags "-X main.version=…"
+// (see Makefile). Defaults to "dev" for unstamped builds.
+var version = "dev"
+
 func main() {
 	if len(os.Args) < 2 {
 		usage()
 		os.Exit(1)
 	}
 	switch os.Args[1] {
+	case "--version", "-v":
+		fmt.Println(version)
+		return
 	case "--daemon":
 		runDaemon()
 	case "register":
@@ -62,6 +69,7 @@ Usage:
   lesche renew               extend caller's lease
   lesche stop
   lesche protocol            print agent-facing protocol guide
+  lesche --version           print version string
 
 Identity:
   On register, lesche generates an Ed25519 keypair for your name.

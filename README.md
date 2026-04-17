@@ -18,12 +18,35 @@ Requires Go 1.21+ to build.
 ```
 git clone <this repo>
 cd lesche
-go build -o lesche .
-# put the binary on $PATH
-install lesche ~/bin/
+make install
+```
+
+The `install` target builds `bin/lesche`, stamps the version from
+`git describe`, copies to `$(PREFIX)/bin/lesche`, and kicks the running
+daemon so the next invocation picks up the new binary.
+
+PREFIX is auto-detected in this order:
+- `/opt/homebrew` (Apple Silicon Homebrew, writable by user)
+- `/usr/local` (likely needs sudo)
+- `~/.local` (user-local fallback)
+
+Override with `make install PREFIX=/custom/path`.
+
+Other targets:
+
+```
+make build       # build bin/lesche
+make test        # go test ./...
+make uninstall   # remove $(PREFIX)/bin/lesche
+make reload      # kick the daemon without reinstalling
+make clean       # remove bin/
 ```
 
 No runtime dependencies. The daemon auto-spawns on first use.
+Registered agents and their keypairs persist across reloads (keys at
+`~/.lesche/keys/`, registry at `~/.local/state/lesche/workspace/registry/`).
+Open tunnels die on daemon restart; peers see `peer_closed` and can
+reopen.
 
 ## Quickstart
 
