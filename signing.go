@@ -51,6 +51,15 @@ func ensureKey(name string) (ed25519.PublicKey, ed25519.PrivateKey, error) {
 	return pub, priv, nil
 }
 
+// removeKey deletes an agent's private key file. No-op if missing.
+func removeKey(name string) error {
+	err := os.Remove(keyPath(name))
+	if err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	return nil
+}
+
 // loadPrivateKey loads an agent's private key from disk. Used by the
 // client side to sign outgoing requests.
 func loadPrivateKey(name string) (ed25519.PrivateKey, error) {

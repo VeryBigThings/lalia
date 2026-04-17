@@ -294,10 +294,15 @@ func TestStateSweepExpiresAgentAndReleasesWaiter(t *testing.T) {
 // releases their hanging channel read with peer_closed, and evicts them
 // from rooms.
 func TestOpUnregisterReleasesWaitersAndEvicts(t *testing.T) {
+	t.Setenv("LESCHE_HOME", t.TempDir())
 	t.Setenv("LESCHE_WORKSPACE", filepath.Join(t.TempDir(), "workspace"))
 	s := newFixtureState()
 	mustRegister(t, s, "alice", 1)
 	mustRegister(t, s, "bob", 2)
+
+	if _, err := loadPrivateKey("alice"); err != nil {
+		t.Fatalf("alice key should exist after register: %v", err)
+	}
 
 	room := newRoom("ops", "", "alice")
 	room.members["bob"] = true
@@ -336,6 +341,10 @@ func TestOpUnregisterReleasesWaitersAndEvicts(t *testing.T) {
 	room.mu.Unlock()
 	if stillMember {
 		t.Fatalf("alice should have been evicted from room")
+	}
+
+	if _, err := loadPrivateKey("alice"); err == nil {
+		t.Fatalf("alice key should have been deleted on unregister")
 	}
 
 	// second unregister is a NotFound.

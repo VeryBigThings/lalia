@@ -278,10 +278,11 @@ func (s *State) opRegister(req Request) Response {
 }
 
 // opUnregister drops the caller from the agent registry, releases their
-// in-flight channel waiters, evicts them from every room, and removes
-// their registry file. The private key on disk is preserved so a
-// subsequent register reuses the same identity and pubkey. Request is
-// signed and authenticated through the dispatch pre-switch.
+// in-flight channel waiters, evicts them from every room, removes
+// their registry file, and deletes their private key on disk. A later
+// register under the same name generates a fresh keypair and a new
+// pubkey — existing signatures do not survive. Request is signed and
+// authenticated through the dispatch pre-switch.
 func (s *State) opUnregister(req Request) Response {
 	from, _ := req.Args["from"].(string)
 	if from == "" {
@@ -316,6 +317,7 @@ func (s *State) opUnregister(req Request) Response {
 		}
 	}
 	s.removeAgentFile(from)
+	_ = removeKey(from)
 
 	return Response{OK: true, Data: map[string]any{"name": from}}
 }
