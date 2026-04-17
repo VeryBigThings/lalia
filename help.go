@@ -16,22 +16,6 @@ There are two transports:
 - **Rooms** — N-party pub/sub. Named, explicit membership, bounded
   mailbox per subscriber with drop-oldest overflow.
 
-## Which binary, which daemon
-
-There is exactly one daemon to talk to: the installed binary at
-whatever "which lesche" resolves, talking to the socket at
-~/.lesche/sock. Always use that for agent-to-agent communication.
-
-    lesche register        # correct
-    /opt/homebrew/bin/lesche register   # same thing, explicit
-
-Do NOT run ./bin/lesche from a feature worktree and do NOT set
-LESCHE_HOME or LESCHE_WORKSPACE at the shell. Those are test-only
-envs that Go test code sets per-test via t.TempDir(). Trying to run
-coordination commands with LESCHE_HOME=/tmp/... typically fails with
-"bind: operation not permitted" because the harness sandbox blocks
-unix-socket binds under /tmp.
-
 ## Identity
 
 Every command needs to know which agent you are. Set it once per shell:

@@ -90,21 +90,13 @@ first message.
 
 ### 2. Register
 
-**Use the installed binary at `/opt/homebrew/bin/lesche` (or wherever
-`which lesche` resolves). Do NOT run `./bin/lesche` from your
-worktree, and do NOT set `LESCHE_HOME` or `LESCHE_WORKSPACE` at the
-shell — those are test-only envs that `go test` sets per-test via
-`t.TempDir()`. Every coordination command (`register`, `agents`,
-`tell`, `read-any`, etc.) must talk to the shared production daemon
-at `~/.lesche/sock`.**
-
-Concretely, setting `LESCHE_HOME=/tmp/...` typically fails with
-`bind: operation not permitted` because harness sandboxes block
-unix-socket binds under `/tmp`. The production daemon is already
-running — just register against it.
+The lesche daemon is already running at `~/.lesche/sock`. Use the
+installed binary (`which lesche`). Register yourself — idempotent,
+reuses your existing Ed25519 key if you registered in a previous
+session:
 
 ```
-lesche register                # production daemon, prod binary
+lesche register
 lesche agents                  # sanity-check: see who else is online
 ```
 
@@ -582,30 +574,19 @@ a short design doc first when that batch starts.
 
 1. **Branch from main. Worktree at `~/Obolos/lesche-<slug>`.**
    `git worktree add -b feat/<slug> ../lesche-<slug> main`.
-2. **Coordination uses the production daemon.** Always. That means
-   the installed binary (`/opt/homebrew/bin/lesche` or whatever
-   `which lesche` resolves) against the socket at `~/.lesche/sock`.
-   Do NOT set `LESCHE_HOME` or `LESCHE_WORKSPACE` at the shell. Do
-   NOT run `./bin/lesche` from your worktree. Isolation for tests is
-   handled per-test by `t.Setenv("LESCHE_WORKSPACE", t.TempDir())`
-   inside Go test code — not at the shell. Running coordination
-   commands with `LESCHE_HOME=/tmp/...` typically fails with
-   `bind: operation not permitted` because harness sandboxes block
-   unix-socket binds under `/tmp`.
-3. **Tests must pass before you report done.** Run `make test`. If it
-   fails, do not report done. Never run `./bin/lesche` manually —
-   `make test` is the only way your branch's binary executes.
-4. **`protocol.go` struct shapes are owned by workstream F** this
+2. **Tests must pass before you report done.** Run `make test`. If
+   it fails, do not report done.
+3. **`protocol.go` struct shapes are owned by workstream F** this
    batch. If you are not F, add fields additively only. F is allowed
    to rework `Response`.
-5. **If you need to touch a file outside your heat-map column**,
+4. **If you need to touch a file outside your heat-map column**,
    stop and `tell claude-coordinator "..."` to check for collisions
    before writing.
-6. **When done, `tell claude-coordinator` and report**: branch name,
+5. **When done, `tell claude-coordinator` and report**: branch name,
    commit SHA, `make test` output summary, any bugs found-but-not-
    fixed, any new env vars or commands added. Coordinator will
    either approve-for-merge or flag issues for another round.
-7. **Rebase before merge.** If main moved while you worked, rebase
+6. **Rebase before merge.** If main moved while you worked, rebase
    your branch and re-run `make test` before asking for merge.
 
 ## What is explicitly off-limits in this batch
