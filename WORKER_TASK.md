@@ -67,11 +67,6 @@ registration kickoff on the owner's first register.
   into the assignment room, flips `kickoff_delivered=true`.
   Idempotent on re-register.
 
-Note: you are building H atop what was originally called the "manager"
-role — one of the sub-tasks in this workstream is renaming manager →
-supervisor everywhere. Workstream I (if merged before you) already
-does this cascade; if I has not merged, you do it as part of H.
-
 ## Files to touch
 
 - **New**: `plan.go` (core ops), `project.go` (git-remote → project-id
@@ -106,9 +101,6 @@ does this cascade; if I has not merged, you do it as part of H.
 - **Write queue shared** with workstream J (`feat/mailbox-persist`).
   Both add SQLite tables. Additive; no schema collision.
 - Parallel-safe with I (`feat/init-run`) — zero file overlap.
-- If I merges before H: pick up the `supervisor` vocabulary from the
-  already-updated BACKLOG.md. If I merges after H: do the rename
-  cascade yourself as part of H.
 
 ## Reporting checkpoints (all in `feat-plan` room)
 
