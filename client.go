@@ -506,8 +506,28 @@ func handle(resp *Response, err error, ok func(any)) {
 		os.Exit(1)
 	}
 	if !resp.OK {
-		fmt.Fprintln(os.Stderr, resp.Error)
+		detail := decodeErrorDetail(resp.Data)
+		if resp.Error != "" {
+			fmt.Fprintln(os.Stderr, resp.Error)
+		} else if detail != nil && detail.Reason != "" {
+			fmt.Fprintln(os.Stderr, detail.Reason)
+		}
+		if detail != nil {
+			if detail.Reason != "" && detail.Reason != resp.Error {
+				fmt.Fprintf(os.Stderr, "reason: %s\n", detail.Reason)
+			}
+			if detail.RetryHint != "" {
+				fmt.Fprintf(os.Stderr, "hint: %s\n", detail.RetryHint)
+			}
+			if len(detail.Context) > 0 {
+				raw, _ := json.Marshal(detail.Context)
+				fmt.Fprintf(os.Stderr, "context: %s\n", raw)
+			}
+		}
 		code := resp.Code
+		if code == 0 && detail != nil {
+			code = detail.Code
+		}
 		if code == 0 {
 			code = 1
 		}
@@ -516,6 +536,31 @@ func handle(resp *Response, err error, ok func(any)) {
 	if ok != nil && resp.Data != nil {
 		ok(resp.Data)
 	}
+}
+
+func decodeErrorDetail(data any) *ErrorDetail {
+	m, ok := data.(map[string]any)
+	if !ok {
+		return nil
+	}
+	raw, ok := m["error"].(map[string]any)
+	if !ok {
+		return nil
+	}
+	detail := &ErrorDetail{}
+	if v, ok := raw["reason"].(string); ok {
+		detail.Reason = v
+	}
+	if v, ok := raw["retry_hint"].(string); ok {
+		detail.RetryHint = v
+	}
+	if v, ok := raw["code"].(float64); ok {
+		detail.Code = int(v)
+	}
+	if v, ok := raw["context"].(map[string]any); ok {
+		detail.Context = v
+	}
+	return detail
 }
 
 func parseFlag(args []string, name string) string {

@@ -7,16 +7,16 @@ import (
 )
 
 type Agent struct {
-	AgentID    string    `json:"agent_id"`              // ULID, stable for the life of the keypair
-	Name       string    `json:"name"`                  // display name, not unique
-	Pubkey     string    `json:"pubkey"`                // hex-encoded Ed25519 public key
-	Harness    string    `json:"harness,omitempty"`     // claude-code | codex | cursor | …
-	Model      string    `json:"model,omitempty"`       // e.g. claude-opus-4-7
-	Project    string    `json:"project,omitempty"`     // resolved from git remote or cwd
-	RepoURL    string    `json:"repo_url,omitempty"`    // full remote URL when available
-	Worktree   string    `json:"worktree,omitempty"`    // basename of cwd
-	Branch     string    `json:"branch,omitempty"`      // git rev-parse --abbrev-ref HEAD
-	CWD        string    `json:"cwd,omitempty"`         // full path the agent is running from
+	AgentID    string    `json:"agent_id"`           // ULID, stable for the life of the keypair
+	Name       string    `json:"name"`               // display name, not unique
+	Pubkey     string    `json:"pubkey"`             // hex-encoded Ed25519 public key
+	Harness    string    `json:"harness,omitempty"`  // claude-code | codex | cursor | …
+	Model      string    `json:"model,omitempty"`    // e.g. claude-opus-4-7
+	Project    string    `json:"project,omitempty"`  // resolved from git remote or cwd
+	RepoURL    string    `json:"repo_url,omitempty"` // full remote URL when available
+	Worktree   string    `json:"worktree,omitempty"` // basename of cwd
+	Branch     string    `json:"branch,omitempty"`   // git rev-parse --abbrev-ref HEAD
+	CWD        string    `json:"cwd,omitempty"`      // full path the agent is running from
 	PID        int       `json:"pid"`
 	StartedAt  time.Time `json:"started_at"`
 	LastSeenAt time.Time `json:"last_seen_at"`
@@ -29,8 +29,8 @@ const sweepInterval = 30 * time.Second
 
 type State struct {
 	mu       sync.Mutex
-	agents   map[string]*Agent  // keyed by agent_id (ULID)
-	nameIdx  map[string]string  // name → agent_id (multiple IDs per name possible)
+	agents   map[string]*Agent // keyed by agent_id (ULID)
+	nameIdx  map[string]string // name → agent_id (multiple IDs per name possible)
 	channels map[string]*Channel
 	rooms    map[string]*Room
 
@@ -212,13 +212,13 @@ func (s *State) dispatch(req Request) Response {
 			}
 			s.mu.Unlock()
 			if a == nil {
-				return Response{Error: "not registered: " + from, Code: CodeUnauthorized}
+				return errorResponse(CodeUnauthorized, "not_registered", "run lesche register for this identity", "not registered: "+from, map[string]any{"from": from})
 			}
 			if pubHex == "" {
-				return Response{Error: "agent " + from + " has no pubkey on file; re-register to acquire one", Code: CodeUnauthorized}
+				return errorResponse(CodeUnauthorized, "missing_pubkey", "run lesche register to generate a keypair", "agent "+from+" has no pubkey on file; re-register to acquire one", map[string]any{"from": from})
 			}
 			if err := verifyRequest(pubHex, req.Args); err != nil {
-				return Response{Error: "signature rejected: " + err.Error(), Code: CodeUnauthorized}
+				return errorResponse(CodeUnauthorized, "signature_rejected", "re-register if your key changed", "signature rejected: "+err.Error(), map[string]any{"from": from})
 			}
 		}
 	}
@@ -264,7 +264,7 @@ func (s *State) dispatch(req Request) Response {
 	case "stop":
 		return s.opStop()
 	default:
-		return Response{Error: "unknown op: " + req.Op}
+		return errorResponse(CodeError, "unknown_op", "check `lesche --help` for supported commands", "unknown op: "+req.Op, map[string]any{"op": req.Op})
 	}
 }
 
@@ -273,11 +273,11 @@ func (s *State) opRegister(req Request) Response {
 	pidF, _ := req.Args["pid"].(float64)
 	pid := int(pidF)
 	if name == "" {
-		return Response{Error: "name required"}
+		return errorResponse(CodeError, "missing_name", "pass --name or set LESCHE_NAME", "name required", nil)
 	}
 	pub, _, err := ensureKey(name)
 	if err != nil {
-		return Response{Error: "keygen failed: " + err.Error()}
+		return errorResponse(CodeError, "keygen_failed", "check key backend permissions and retry", "keygen failed: "+err.Error(), map[string]any{"name": name})
 	}
 	pubHex := fmt.Sprintf("%x", pub)
 
@@ -349,13 +349,13 @@ func strVal(args map[string]any, key string) string {
 func (s *State) opUnregister(req Request) Response {
 	from, _ := req.Args["from"].(string)
 	if from == "" {
-		return Response{Error: "from required"}
+		return errorResponse(CodeError, "missing_from", "set LESCHE_NAME or pass --as", "from required", nil)
 	}
 	s.mu.Lock()
 	a := s.agentByName(from)
 	if a == nil {
 		s.mu.Unlock()
-		return Response{Error: "not registered: " + from, Code: CodeNotFound}
+		return errorResponse(CodeNotFound, "not_registered", "run lesche register before unregister", "not registered: "+from, map[string]any{"from": from})
 	}
 	agentID := a.AgentID
 	s.unindexAgent(agentID)
@@ -390,13 +390,13 @@ func (s *State) opUnregister(req Request) Response {
 func (s *State) opRenew(req Request) Response {
 	from, _ := req.Args["from"].(string)
 	if from == "" {
-		return Response{Error: "from required"}
+		return errorResponse(CodeError, "missing_from", "set LESCHE_NAME or pass --as", "from required", nil)
 	}
 	s.mu.Lock()
 	a := s.agentByName(from)
 	if a == nil {
 		s.mu.Unlock()
-		return Response{Error: "not registered: " + from, Code: CodeNotFound}
+		return errorResponse(CodeNotFound, "not_registered", "run lesche register before renew", "not registered: "+from, map[string]any{"from": from})
 	}
 	now := time.Now()
 	a.LastSeenAt = now
@@ -413,12 +413,12 @@ func (s *State) opRenew(req Request) Response {
 func (s *State) opChannels(req Request) Response {
 	from, _ := req.Args["from"].(string)
 	if from == "" {
-		return Response{Error: "from required"}
+		return errorResponse(CodeError, "missing_from", "set LESCHE_NAME or pass --as", "from required", nil)
 	}
 	s.mu.Lock()
 	if s.agentByName(from) == nil {
 		s.mu.Unlock()
-		return Response{Error: "not registered: " + from, Code: CodeNotFound}
+		return errorResponse(CodeNotFound, "not_registered", "run lesche register before listing channels", "not registered: "+from, map[string]any{"from": from})
 	}
 	s.mu.Unlock()
 	out := []any{}
@@ -442,21 +442,21 @@ func (s *State) opTell(req Request) Response {
 	peer, _ := req.Args["peer"].(string)
 	body, _ := req.Args["body"].(string)
 	if from == "" || peer == "" {
-		return Response{Error: "from and peer required"}
+		return errorResponse(CodeError, "missing_params", "provide both from and peer", "from and peer required", map[string]any{"from": from, "peer": peer})
 	}
 	if from == peer {
-		return Response{Error: "cannot tell self"}
+		return errorResponse(CodeError, "self_target", "choose a different peer", "cannot tell self", map[string]any{"from": from})
 	}
 	s.mu.Lock()
 	if s.agentByName(from) == nil {
 		s.mu.Unlock()
-		return Response{Error: "caller not registered: " + from, Code: CodeNotFound}
+		return errorResponse(CodeNotFound, "caller_not_registered", "run lesche register before sending", "caller not registered: "+from, map[string]any{"from": from})
 	}
 	// Resolve peer address to a name
 	peerName, err := s.resolvePeerName(peer)
 	if err != nil {
 		s.mu.Unlock()
-		return Response{Error: err.Error(), Code: CodeNotFound}
+		return errorResponse(CodeNotFound, "peer_not_registered", "check `lesche agents` for active peers", err.Error(), map[string]any{"peer": peer})
 	}
 	s.mu.Unlock()
 	ch := s.getOrCreateChannel(from, peerName)
@@ -472,20 +472,20 @@ func (s *State) opRead(req Request) Response {
 	timeoutF, _ := req.Args["timeout"].(float64)
 	timeout := int(timeoutF)
 	if from == "" {
-		return Response{Error: "from required"}
+		return errorResponse(CodeError, "missing_from", "set LESCHE_NAME or pass --as", "from required", nil)
 	}
 	if peer == "" && room == "" {
-		return Response{Error: "peer or room required"}
+		return errorResponse(CodeError, "missing_target", "specify peer or room", "peer or room required", nil)
 	}
 	if peer != "" && room != "" {
-		return Response{Error: "specify peer or room, not both"}
+		return errorResponse(CodeError, "ambiguous_target", "specify exactly one of peer or room", "specify peer or room, not both", map[string]any{"peer": peer, "room": room})
 	}
 	if peer != "" {
 		s.mu.Lock()
 		peerName, err := s.resolvePeerName(peer)
 		if err != nil {
 			s.mu.Unlock()
-			return Response{Error: err.Error(), Code: CodeNotFound}
+			return errorResponse(CodeNotFound, "peer_not_registered", "check `lesche agents` for active peers", err.Error(), map[string]any{"peer": peer})
 		}
 		s.mu.Unlock()
 		ch := s.getOrCreateChannel(from, peerName)
@@ -500,20 +500,20 @@ func (s *State) opPeek(req Request) Response {
 	peer, _ := req.Args["peer"].(string)
 	room, _ := req.Args["room"].(string)
 	if from == "" {
-		return Response{Error: "from required"}
+		return errorResponse(CodeError, "missing_from", "set LESCHE_NAME or pass --as", "from required", nil)
 	}
 	if peer == "" && room == "" {
-		return Response{Error: "peer or room required"}
+		return errorResponse(CodeError, "missing_target", "specify peer or room", "peer or room required", nil)
 	}
 	if peer != "" && room != "" {
-		return Response{Error: "specify peer or room, not both"}
+		return errorResponse(CodeError, "ambiguous_target", "specify exactly one of peer or room", "specify peer or room, not both", map[string]any{"peer": peer, "room": room})
 	}
 	if peer != "" {
 		s.mu.Lock()
 		peerName, err := s.resolvePeerName(peer)
 		if err != nil {
 			s.mu.Unlock()
-			return Response{Error: err.Error(), Code: CodeNotFound}
+			return errorResponse(CodeNotFound, "peer_not_registered", "check `lesche agents` for active peers", err.Error(), map[string]any{"peer": peer})
 		}
 		_, hasChannel := s.channels[channelKey(from, peerName)]
 		s.mu.Unlock()
@@ -537,7 +537,7 @@ func (s *State) opReadAny(req Request) Response {
 		timeout = 300
 	}
 	if from == "" {
-		return Response{Error: "from required"}
+		return errorResponse(CodeError, "missing_from", "set LESCHE_NAME or pass --as", "from required", nil)
 	}
 	// First pass: drain any pending messages from channels or rooms.
 	s.mu.Lock()
@@ -574,7 +574,7 @@ func (s *State) opReadAny(req Request) Response {
 	}
 	if _, ok := s.anyWaiter[from]; ok {
 		s.mu.Unlock()
-		return Response{Error: "another read-any is already pending for " + from, Code: CodeError}
+		return errorResponse(CodeError, "read_any_already_pending", "wait for the existing read-any call to finish", "another read-any is already pending for "+from, map[string]any{"from": from})
 	}
 	ch := make(chan anyMsg, 1)
 	s.anyWaiter[from] = ch
@@ -587,7 +587,7 @@ func (s *State) opReadAny(req Request) Response {
 		s.mu.Lock()
 		delete(s.anyWaiter, from)
 		s.mu.Unlock()
-		return Response{Error: "timeout waiting for any channel", Code: CodeTimeout}
+		return errorResponse(CodeTimeout, "timeout", "retry with a longer --timeout", "timeout waiting for any channel", map[string]any{"from": from, "timeout_seconds": timeout})
 	}
 }
 
@@ -612,25 +612,25 @@ func (s *State) opHistory(req Request) Response {
 	since := int(sinceF)
 	limit := int(limitF)
 	if from == "" {
-		return Response{Error: "from required"}
+		return errorResponse(CodeError, "missing_from", "set LESCHE_NAME or pass --as", "from required", nil)
 	}
 	if peer == "" && room == "" {
-		return Response{Error: "peer or room required"}
+		return errorResponse(CodeError, "missing_target", "specify peer or room", "peer or room required", nil)
 	}
 	if peer != "" && room != "" {
-		return Response{Error: "specify peer or room, not both"}
+		return errorResponse(CodeError, "ambiguous_target", "specify exactly one of peer or room", "specify peer or room, not both", map[string]any{"peer": peer, "room": room})
 	}
 	if peer != "" {
 		s.mu.Lock()
 		c, ok := s.channels[channelKey(from, peer)]
 		s.mu.Unlock()
 		if !ok {
-			return Response{Error: "channel not found: " + peer, Code: CodeNotFound}
+			return errorResponse(CodeNotFound, "channel_not_found", "send a message first to create a channel", "channel not found: "+peer, map[string]any{"peer": peer})
 		}
 		c.mu.Lock()
 		defer c.mu.Unlock()
 		if c.PeerA != from && c.PeerB != from {
-			return Response{Error: "channel not found: " + peer, Code: CodeNotFound}
+			return errorResponse(CodeNotFound, "channel_not_found", "request history only for your own channels", "channel not found: "+peer, map[string]any{"from": from, "peer": peer})
 		}
 		out := sliceHistory(c.log, since, limit)
 		return Response{OK: true, Data: map[string]any{
@@ -701,14 +701,14 @@ func (s *State) opAgents() Response {
 func (s *State) opResolve(req Request) Response {
 	address, _ := req.Args["address"].(string)
 	if address == "" {
-		return Response{Error: "address required"}
+		return errorResponse(CodeError, "missing_address", "pass an address to resolve", "address required", nil)
 	}
 	nicknames, _ := loadNicknames()
 	s.mu.Lock()
 	agentID, err := s.ResolveAddress(address, nicknames)
 	s.mu.Unlock()
 	if err != nil {
-		return Response{Error: err.Error(), Code: CodeNotFound}
+		return errorResponse(CodeNotFound, "address_not_found", "check `lesche agents` or nicknames", err.Error(), map[string]any{"address": address})
 	}
 	return Response{OK: true, Data: map[string]any{"agent_id": agentID}}
 }

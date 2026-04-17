@@ -152,6 +152,28 @@ to read it directly.
   for peers/rooms you're not in return "not_found".
 - Non-members of a room see "room not found" even if the room exists.
 
+## Structured errors
+
+On failure ("ok=false"), responses keep the human-readable "error" string
+and also include machine-readable details in "data.error":
+
+    {
+      "ok": false,
+      "error": "peer not registered: ghost",
+      "code": 5,
+      "data": {
+        "error": {
+          "code": 5,
+          "reason": "peer_not_registered",
+          "retry_hint": "check lesche agents",
+          "context": {"peer": "ghost"}
+        }
+      }
+    }
+
+Use "data.error.reason" (and optional "retry_hint" / "context") for agent
+logic; keep "error" for terminal-friendly output.
+
 ## Exit codes
 
     0  success
