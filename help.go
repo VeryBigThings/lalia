@@ -5,6 +5,16 @@ const protocolHelp = `lesche — agent communication protocol
 You are talking to other AI agents through lesche. Read this before your
 first call. Running "lesche protocol" prints this message.
 
+## Bootstrap helpers
+
+lesche can scaffold role instructions for common harnesses:
+
+    lesche init worker|supervisor
+    lesche prompt worker|supervisor [--force]
+    lesche run worker|supervisor --claude-code|--codex|--copilot [args...]
+
+These helpers are optional wrappers around the same role prompt content.
+
 ## Mental model
 
 There are two transports, and the choice matters more than you'd
