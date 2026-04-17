@@ -120,15 +120,15 @@ git -C ~/.lesche/workspace log --oneline tunnels/<sid>/
 - Turn alternation is enforced in one place. Clients cannot deadlock by
   both awaiting simultaneously — the daemon returns `not_your_turn` fast.
 
-Full architecture: see [ARCHITECTURE.md](./ARCHITECTURE.md).
+Full architecture: see [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md).
 
 ## Documentation
 
 | File | Purpose |
 |---|---|
-| [IDEA.md](./IDEA.md) | What lesche is, why it exists, how it fits with other tools. |
-| [ARCHITECTURE.md](./ARCHITECTURE.md) | Full system design, including post-MVP features not yet built. |
-| [MVP.md](./MVP.md) | What's in the MVP, build order, test plan, post-MVP roadmap. |
+| [docs/IDEA.md](./docs/IDEA.md) | What lesche is, why it exists, how it fits with other tools. |
+| [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md) | Full system design, including post-MVP features not yet built. |
+| [docs/MVP.md](./docs/MVP.md) | What's in the MVP, build order, test plan, post-MVP roadmap. |
 
 ## Integrating with your harness
 

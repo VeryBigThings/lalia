@@ -35,12 +35,12 @@ files on top of this.
    "Current assignments", "Parallelization principles", "File-
    ownership heat map", "Rules of engagement", and the scope entry
    for your specific workstream.
-2. **`ARCHITECTURE.md`** — how the pieces fit. Daemon/client/channel/
+2. **`docs/ARCHITECTURE.md`** — how the pieces fit. Daemon/client/channel/
    room/writer/registry model.
-3. **`IDEA.md`** — why lesche exists. Short.
-4. **`MVP.md`** — what is shipping and what isn't. Large parts are
+3. **`docs/IDEA.md`** — why lesche exists. Short.
+4. **`docs/MVP.md`** — what is shipping and what isn't. Large parts are
    retrospective now that channels / rooms / queue have landed.
-5. **`CHANNELS.md`** — the messaging redesign (shipped). Read if you
+5. **`docs/CHANNELS.md`** — the messaging redesign (shipped). Read if you
    are confused about why there is no `tunnel` / `send` / `await`
    / `sid` anywhere.
 6. **`protocol.go`** — wire-level request/response shapes. Currently
@@ -288,7 +288,7 @@ Merge gate unchanged: `make test` passing + human approval via
 
 - Lease TTL raised to 60 minutes (was 10, then 30). Still skips renewal on
   `agents`; that's a follow-up if idle-drop keeps hurting.
-- Channels redesign shipped (workstream G). See `CHANNELS.md` for
+- Channels redesign shipped (workstream G). See `docs/CHANNELS.md` for
   the plan document, kept as historical context. Current behavior is
   documented in `help.go` and `lesche protocol`.
 
@@ -298,7 +298,7 @@ Read this after the cold-start list above, before writing code.
 
 **A. Identity refactor + nicknames (`copilot`, `feat/identity`)**
 
-1. `IDENTITY.md` — the spec you're implementing. Read this first;
+1. `docs/IDENTITY.md` — the spec you're implementing. Read this first;
    everything else is just how to land it in the current code.
 2. `registry.go` — persistence of the agent table. You will rework
    the keying from name to ULID, preserving pubkeys during migration.
@@ -311,7 +311,7 @@ Read this after the cold-start list above, before writing code.
 5. `daemon_integration_test.go` — the registration + signed-request
    flow you must not break during migration.
 6. Open question before you start: **nickname storage location**.
-   `IDENTITY.md` proposes `~/.lesche/nicknames.json` outside the
+   `docs/IDENTITY.md` proposes `~/.lesche/nicknames.json` outside the
    workspace; alternative is in the git-backed workspace for audit.
    Raise this in your kickoff message to `claude-coordinator`
    (e.g. `ask claude-coordinator "nickname storage: home or workspace?"`).
@@ -384,7 +384,7 @@ updates). Merge gate is `make test` passing plus human approval via
 2. **SQLite dependency.** `modernc.org/sqlite` — pure Go, no cgo,
    static-binary story preserved. Shipped in write-queue.
 3. **Nickname storage location** still open; pick before feat/identity
-   starts. `IDENTITY.md` proposes `~/.lesche/nicknames.json` (outside
+   starts. `docs/IDENTITY.md` proposes `~/.lesche/nicknames.json` (outside
    workspace). Alternative: in the workspace for git audit. Copilot
    should `ask claude-coordinator` on kickoff.
 
@@ -528,7 +528,7 @@ needs the rename).
 metadata (project, branch, harness, model) auto-detected on register;
 add user-assigned nicknames.
 
-**Scope**: Implement everything described in `IDENTITY.md`. Preserve
+**Scope**: Implement everything described in `docs/IDENTITY.md`. Preserve
 existing pubkeys during migration (signatures keep working). Update
 address resolution throughout.
 
@@ -552,7 +552,7 @@ already have full lesche internals loaded.
 ### ~~B. Room mode~~ — shipped at `e4e7186`.
 ### ~~C. SQLite write queue~~ — shipped at `d113b02`.
 ### ~~D. Resumable blocking~~ — killed by channels redesign (no FSM, no waiter state to resume).
-### ~~G. Channels redesign~~ — shipped at `9d192bf`. See `CHANNELS.md`.
+### ~~G. Channels redesign~~ — shipped at `9d192bf`. See `docs/CHANNELS.md`.
 
 ### E. Keychain integration
 
