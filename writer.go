@@ -8,9 +8,10 @@ import (
 )
 
 type writeOp struct {
-	relPath    string
-	content    []byte
-	commitMsg  string
+	queueID   int64 // SQLite row ID; 0 means not persisted to queue
+	relPath   string
+	content   []byte
+	commitMsg string
 }
 
 func ensureWorkspace() error {
@@ -39,36 +40,84 @@ func ensureWorkspace() error {
 	return nil
 }
 
+// enqueueWrite inserts the op into the SQLite queue synchronously (so it is
+// durable before we return to the caller), then forwards it to the writer
+// goroutine for async git commit.
 func (s *State) enqueueWrite(relPath string, content []byte, commitMsg string) {
-	select {
-	case s.writes <- writeOp{relPath: relPath, content: content, commitMsg: commitMsg}:
-	default:
-		// if queue is full, block. Never drop.
-		s.writes <- writeOp{relPath: relPath, content: content, commitMsg: commitMsg}
+	op := writeOp{relPath: relPath, content: content, commitMsg: commitMsg}
+	if s.queue != nil {
+		id, err := s.queue.insert(relPath, content, commitMsg)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "queue insert:", err)
+			// fall through: still attempt the write; just won't survive a crash
+		} else {
+			op.queueID = id
+		}
 	}
+	s.writes <- op
 }
 
 func (s *State) runWriter() {
 	s.wg.Add(1)
-	defer s.wg.Done()
+	defer func() {
+		if s.queue != nil {
+			if err := s.queue.close(); err != nil {
+				fmt.Fprintln(os.Stderr, "queue close:", err)
+			}
+		}
+		s.wg.Done()
+	}()
+
 	ws := workspacePath()
+
+	// Replay any entries that survived a previous crash (inserted into the
+	// queue but never committed to git and deleted).
+	if s.queue != nil {
+		rows, err := s.queue.pending()
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "queue replay:", err)
+		} else if len(rows) > 0 {
+			fmt.Fprintf(os.Stderr, "replaying %d pending queue entries\n", len(rows))
+			for _, r := range rows {
+				s.commitWrite(ws, writeOp{
+					queueID:   r.id,
+					relPath:   r.relPath,
+					content:   r.content,
+					commitMsg: r.commitMsg,
+				})
+			}
+		}
+	}
+
 	for op := range s.writes {
-		full := filepath.Join(ws, op.relPath)
-		if err := os.MkdirAll(filepath.Dir(full), 0700); err != nil {
-			fmt.Fprintln(os.Stderr, "mkdir:", err)
-			continue
-		}
-		if err := os.WriteFile(full, op.content, 0600); err != nil {
-			fmt.Fprintln(os.Stderr, "write:", err)
-			continue
-		}
-		if out, err := exec.Command("git", "-C", ws, "add", op.relPath).CombinedOutput(); err != nil {
-			fmt.Fprintln(os.Stderr, "git add:", string(out), err)
-			continue
-		}
-		if out, err := exec.Command("git", "-C", ws, "commit", "-q", "-m", op.commitMsg).CombinedOutput(); err != nil {
-			fmt.Fprintln(os.Stderr, "git commit:", string(out), err)
-			continue
+		s.commitWrite(ws, op)
+	}
+}
+
+// commitWrite writes the file, commits it to git, then removes the queue row.
+func (s *State) commitWrite(ws string, op writeOp) {
+	full := filepath.Join(ws, op.relPath)
+	if err := os.MkdirAll(filepath.Dir(full), 0700); err != nil {
+		fmt.Fprintln(os.Stderr, "mkdir:", err)
+		return
+	}
+	if err := os.WriteFile(full, op.content, 0600); err != nil {
+		fmt.Fprintln(os.Stderr, "write:", err)
+		return
+	}
+	if out, err := exec.Command("git", "-C", ws, "add", op.relPath).CombinedOutput(); err != nil {
+		fmt.Fprintln(os.Stderr, "git add:", string(out), err)
+		return
+	}
+	if out, err := exec.Command("git", "-C", ws, "commit", "-q", "-m", op.commitMsg).CombinedOutput(); err != nil {
+		fmt.Fprintln(os.Stderr, "git commit:", string(out), err)
+		return
+	}
+	// Delete from queue only after a successful git commit.
+	if s.queue != nil && op.queueID > 0 {
+		if err := s.queue.delete(op.queueID); err != nil {
+			fmt.Fprintln(os.Stderr, "queue delete:", err)
 		}
 	}
 }
+
