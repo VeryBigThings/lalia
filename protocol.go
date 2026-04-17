@@ -17,7 +17,6 @@ type Response struct {
 type Message struct {
 	Seq  int       `json:"seq"`
 	From string    `json:"from"`
-	SID  string    `json:"sid"`
 	TS   time.Time `json:"ts"`
 	Body string    `json:"body"`
 }
@@ -27,6 +26,9 @@ const (
 	CodeError        = 1
 	CodeTimeout      = 2
 	CodePeerClosed   = 3
+	// CodeNotYourTurn is reserved; no longer produced now that channels have
+	// no turn FSM. Keep the slot so external tooling that still parses 4
+	// doesn't silently reuse the code for a new meaning.
 	CodeNotYourTurn  = 4
 	CodeNotFound     = 5
 	CodeUnauthorized = 6 // signature rejected or caller not registered

@@ -9,7 +9,7 @@ import (
 func newFixtureState() *State {
 	return &State{
 		agents:    make(map[string]*Agent),
-		tunnels:   make(map[string]*Tunnel),
+		channels:  make(map[string]*Channel),
 		rooms:     make(map[string]*Room),
 		anyWaiter: make(map[string]chan anyMsg),
 		writes:    make(chan writeOp, 128),
@@ -23,25 +23,6 @@ func mustRegister(t *testing.T, s *State, name string, pid int) {
 	if !resp.OK {
 		t.Fatalf("register %s failed: %+v", name, resp)
 	}
-}
-
-func findSessionBySID(t *testing.T, data any, sid string) map[string]any {
-	t.Helper()
-	rows, ok := data.([]any)
-	if !ok {
-		t.Fatalf("sessions data type=%T, want []any", data)
-	}
-	for _, row := range rows {
-		m, ok := row.(map[string]any)
-		if !ok {
-			continue
-		}
-		if got, _ := m["sid"].(string); got == sid {
-			return m
-		}
-	}
-	t.Fatalf("sid %s not found in sessions", sid)
-	return nil
 }
 
 func TestStateRegisterRenewAgents(t *testing.T) {
@@ -69,7 +50,7 @@ func TestStateRegisterRenewAgents(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse renewed expires_at: %v", err)
 	}
-	if expires2.Before(time.Now().Add(9 * time.Minute)) {
+	if expires2.Before(time.Now().Add(leaseTTL - time.Minute)) {
 		t.Fatalf("expected renewed expiry to be near lease horizon, got %s", expires2)
 	}
 
@@ -88,135 +69,229 @@ func TestStateRegisterRenewAgents(t *testing.T) {
 	}
 }
 
-func TestStateTunnelAndSessions(t *testing.T) {
+// TestChannelTellReadPeek covers the basic P2P lifecycle: tell creates a
+// channel on first use, the peer reads it with non-blocking read, peek is
+// non-destructive, and a second read returns empty.
+func TestChannelTellReadPeek(t *testing.T) {
 	s := newFixtureState()
 	mustRegister(t, s, "alice", 1)
 	mustRegister(t, s, "bob", 2)
-	mustRegister(t, s, "carol", 3)
 
-	notReg := s.opTunnel(Request{Args: map[string]any{"from": "ghost", "peer": "bob"}})
-	if notReg.OK || notReg.Code != CodeNotFound {
-		t.Fatalf("expected caller not found: %+v", notReg)
-	}
-
-	self := s.opTunnel(Request{Args: map[string]any{"from": "alice", "peer": "alice"}})
-	if self.OK {
-		t.Fatalf("self tunnel should fail: %+v", self)
+	// tell alice→bob
+	tell := s.opTell(Request{Args: map[string]any{"from": "alice", "peer": "bob", "body": "hello bob"}})
+	if !tell.OK {
+		t.Fatalf("tell failed: %+v", tell)
 	}
 
-	ab := s.opTunnel(Request{Args: map[string]any{"from": "alice", "peer": "bob"}})
-	if !ab.OK {
-		t.Fatalf("open alice-bob tunnel: %+v", ab)
+	// bob peeks: sees pending message without consuming.
+	peek := s.opPeek(Request{Args: map[string]any{"from": "bob", "peer": "alice"}})
+	if !peek.OK {
+		t.Fatalf("peek failed: %+v", peek)
 	}
-	abSID := ab.Data.(map[string]any)["sid"].(string)
-
-	bc := s.opTunnel(Request{Args: map[string]any{"from": "bob", "peer": "carol"}})
-	if !bc.OK {
-		t.Fatalf("open bob-carol tunnel: %+v", bc)
-	}
-	bcSID := bc.Data.(map[string]any)["sid"].(string)
-
-	s.mu.Lock()
-	abTunnel := s.tunnels[abSID]
-	s.mu.Unlock()
-	out := abTunnel.send(s, "alice", "hello bob", 5*time.Millisecond)
-	if out.OK || out.Code != CodeTimeout {
-		t.Fatalf("send timeout expected for setup send: %+v", out)
+	pmsgs := peek.Data.(map[string]any)["messages"].([]any)
+	if len(pmsgs) != 1 {
+		t.Fatalf("peek count=%d, want 1", len(pmsgs))
 	}
 
-	sessions := s.opSessions(Request{Args: map[string]any{"from": "bob"}})
-	if !sessions.OK {
-		t.Fatalf("sessions failed: %+v", sessions)
+	// bob reads: consumes it (non-blocking).
+	read := s.opRead(Request{Args: map[string]any{"from": "bob", "peer": "alice", "timeout": float64(0)}})
+	if !read.OK {
+		t.Fatalf("read failed: %+v", read)
 	}
-	abRow := findSessionBySID(t, sessions.Data, abSID)
-	if pending := int(abRow["pending_for_me"].(int)); pending != 1 {
-		t.Fatalf("pending_for_me on %s = %d, want 1", abSID, pending)
+	body, _ := read.Data.(map[string]any)["body"].(string)
+	if body != "hello bob" {
+		t.Fatalf("read body=%q, want hello bob", body)
 	}
-	bcRow := findSessionBySID(t, sessions.Data, bcSID)
-	if peer := bcRow["peer"].(string); peer != "carol" {
-		t.Fatalf("peer on %s=%s, want carol", bcSID, peer)
+
+	// read again → empty.
+	again := s.opRead(Request{Args: map[string]any{"from": "bob", "peer": "alice", "timeout": float64(0)}})
+	if !again.OK {
+		t.Fatalf("read again failed: %+v", again)
+	}
+	m := again.Data.(map[string]any)
+	if _, has := m["body"]; has {
+		t.Fatalf("second read should be empty, got %+v", m)
 	}
 }
 
-func TestStateHistoryAccessAndFilters(t *testing.T) {
+// TestChannelConsecutiveTellsPreservedOrder verifies the turn-FSM removal:
+// one side can send multiple messages in a row and the peer reads them in
+// send order.
+func TestChannelConsecutiveTellsPreservedOrder(t *testing.T) {
+	s := newFixtureState()
+	mustRegister(t, s, "alice", 1)
+	mustRegister(t, s, "bob", 2)
+
+	for _, body := range []string{"one", "two", "three"} {
+		resp := s.opTell(Request{Args: map[string]any{"from": "alice", "peer": "bob", "body": body}})
+		if !resp.OK {
+			t.Fatalf("tell %s failed: %+v", body, resp)
+		}
+	}
+
+	got := []string{}
+	for i := 0; i < 3; i++ {
+		resp := s.opRead(Request{Args: map[string]any{"from": "bob", "peer": "alice", "timeout": float64(0)}})
+		if !resp.OK {
+			t.Fatalf("read %d failed: %+v", i, resp)
+		}
+		body, _ := resp.Data.(map[string]any)["body"].(string)
+		got = append(got, body)
+	}
+	want := []string{"one", "two", "three"}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("read order got=%v, want=%v", got, want)
+		}
+	}
+}
+
+// TestChannelBlockingRead blocks on read until a tell lands, then returns.
+func TestChannelBlockingRead(t *testing.T) {
+	s := newFixtureState()
+	mustRegister(t, s, "alice", 1)
+	mustRegister(t, s, "bob", 2)
+
+	done := make(chan Response, 1)
+	go func() {
+		done <- s.opRead(Request{Args: map[string]any{"from": "bob", "peer": "alice", "timeout": float64(2)}})
+	}()
+	time.Sleep(25 * time.Millisecond)
+
+	tell := s.opTell(Request{Args: map[string]any{"from": "alice", "peer": "bob", "body": "late"}})
+	if !tell.OK {
+		t.Fatalf("tell failed: %+v", tell)
+	}
+
+	resp := <-done
+	if !resp.OK {
+		t.Fatalf("blocking read failed: %+v", resp)
+	}
+	if body, _ := resp.Data.(map[string]any)["body"].(string); body != "late" {
+		t.Fatalf("body=%q, want late", body)
+	}
+}
+
+// TestChannelReadTimeoutEmpty verifies that read with timeout returns empty
+// without error when nothing arrives in time.
+func TestChannelReadTimeoutEmpty(t *testing.T) {
+	s := newFixtureState()
+	mustRegister(t, s, "alice", 1)
+	mustRegister(t, s, "bob", 2)
+
+	resp := s.opRead(Request{Args: map[string]any{"from": "bob", "peer": "alice", "timeout": float64(0)}})
+	if !resp.OK {
+		t.Fatalf("read timeout should return OK+empty: %+v", resp)
+	}
+	m := resp.Data.(map[string]any)
+	if _, has := m["body"]; has {
+		t.Fatalf("expected empty, got %+v", m)
+	}
+}
+
+// TestChannelRejectsUnregisteredPeer ensures a tell to an unknown peer
+// fails with CodeNotFound.
+func TestChannelRejectsUnregisteredPeer(t *testing.T) {
+	s := newFixtureState()
+	mustRegister(t, s, "alice", 1)
+
+	resp := s.opTell(Request{Args: map[string]any{"from": "alice", "peer": "ghost", "body": "hi"}})
+	if resp.OK || resp.Code != CodeNotFound {
+		t.Fatalf("tell to unknown peer should be not_found: %+v", resp)
+	}
+}
+
+// TestChannelsListing verifies the "channels" op returns the caller's
+// peer-pair channels with pending counts.
+func TestChannelsListing(t *testing.T) {
 	s := newFixtureState()
 	mustRegister(t, s, "alice", 1)
 	mustRegister(t, s, "bob", 2)
 	mustRegister(t, s, "carol", 3)
 
-	open := s.opTunnel(Request{Args: map[string]any{"from": "alice", "peer": "bob"}})
-	if !open.OK {
-		t.Fatalf("open tunnel: %+v", open)
-	}
-	sid := open.Data.(map[string]any)["sid"].(string)
+	s.opTell(Request{Args: map[string]any{"from": "alice", "peer": "bob", "body": "x"}})
+	s.opTell(Request{Args: map[string]any{"from": "alice", "peer": "carol", "body": "y"}})
 
-	s.mu.Lock()
-	tun := s.tunnels[sid]
-	tun.log = []Message{
-		{Seq: 1, SID: sid, From: "alice", TS: time.Now().Add(-2 * time.Second), Body: "one"},
-		{Seq: 2, SID: sid, From: "bob", TS: time.Now().Add(-1 * time.Second), Body: "two"},
-		{Seq: 3, SID: sid, From: "alice", TS: time.Now(), Body: "three"},
+	list := s.opChannels(Request{Args: map[string]any{"from": "alice"}})
+	if !list.OK {
+		t.Fatalf("channels failed: %+v", list)
 	}
-	tun.seq = 3
-	s.mu.Unlock()
-
-	nonPeer := s.opHistory(Request{Args: map[string]any{"from": "carol", "sid": sid}})
-	if nonPeer.OK || nonPeer.Code != CodeNotFound {
-		t.Fatalf("non-peer history should be not_found: %+v", nonPeer)
+	rows := list.Data.([]any)
+	if len(rows) != 2 {
+		t.Fatalf("alice should have 2 channels, got %d", len(rows))
 	}
+}
 
-	h := s.opHistory(Request{Args: map[string]any{"from": "bob", "sid": sid, "since": float64(1), "limit": float64(1)}})
+// TestHistoryChannelPeerOnly: non-peer cannot read the transcript.
+func TestHistoryChannelPeerOnly(t *testing.T) {
+	s := newFixtureState()
+	mustRegister(t, s, "alice", 1)
+	mustRegister(t, s, "bob", 2)
+	mustRegister(t, s, "carol", 3)
+
+	s.opTell(Request{Args: map[string]any{"from": "alice", "peer": "bob", "body": "m1"}})
+	s.opTell(Request{Args: map[string]any{"from": "bob", "peer": "alice", "body": "m2"}})
+
+	h := s.opHistory(Request{Args: map[string]any{"from": "alice", "peer": "bob"}})
 	if !h.OK {
-		t.Fatalf("peer history failed: %+v", h)
+		t.Fatalf("history failed: %+v", h)
 	}
 	msgs := h.Data.(map[string]any)["messages"].([]any)
-	if len(msgs) != 1 {
-		t.Fatalf("history len=%d, want 1", len(msgs))
+	if len(msgs) != 2 {
+		t.Fatalf("history len=%d, want 2", len(msgs))
 	}
-	m := msgs[0].(map[string]any)
-	if seq := int(m["seq"].(int)); seq != 3 {
-		t.Fatalf("history seq=%d, want 3", seq)
+
+	// carol is not a peer of alice↔bob; she asks about her own peer-pair
+	// with bob, which has no messages yet.
+	h2 := s.opHistory(Request{Args: map[string]any{"from": "carol", "peer": "bob"}})
+	if h2.OK || h2.Code != CodeNotFound {
+		t.Fatalf("carol reading carol↔bob (empty) should be not_found: %+v", h2)
 	}
 }
 
-func TestStateSweepExpiresAgentAndClosesTunnel(t *testing.T) {
+// TestStateSweepExpiresAgentAndReleasesWaiter: an agent whose lease expires
+// has its hanging read released immediately so its client returns.
+func TestStateSweepExpiresAgentAndReleasesWaiter(t *testing.T) {
 	t.Setenv("LESCHE_WORKSPACE", filepath.Join(t.TempDir(), "workspace"))
 	s := newFixtureState()
 	now := time.Now()
 
 	s.agents["alice"] = &Agent{Name: "alice", ExpiresAt: now.Add(-time.Second), LastSeenAt: now.Add(-time.Minute)}
 	s.agents["bob"] = &Agent{Name: "bob", ExpiresAt: now.Add(time.Hour), LastSeenAt: now}
+	// open channel alice-bob, register alice's waiter manually.
+	ch := s.getOrCreateChannel("alice", "bob")
 
-	tun := newTunnel("sid-expire", "alice", "bob")
-	s.tunnels[tun.SID] = tun
+	readDone := make(chan Response, 1)
+	go func() {
+		readDone <- ch.read("alice", 3*time.Second)
+	}()
+	time.Sleep(25 * time.Millisecond)
 
 	s.sweep()
+
+	select {
+	case resp := <-readDone:
+		if resp.OK || resp.Code != CodePeerClosed {
+			t.Fatalf("alice's hanging read after sweep should be peer_closed: %+v", resp)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatalf("alice's hanging read did not return after sweep")
+	}
 
 	s.mu.Lock()
 	_, aliceStill := s.agents["alice"]
 	_, bobStill := s.agents["bob"]
 	s.mu.Unlock()
 	if aliceStill {
-		t.Fatalf("alice should have expired and been removed")
+		t.Fatalf("alice should have been dropped")
 	}
 	if !bobStill {
 		t.Fatalf("bob should still exist")
 	}
-
-	tun.mu.Lock()
-	closed := tun.closed
-	hangup := tun.hangup
-	tun.mu.Unlock()
-	if !closed || hangup != "peer lease expired" {
-		t.Fatalf("tunnel close mismatch: closed=%v hangup=%q", closed, hangup)
-	}
-
-	await := tun.await("bob", 10*time.Millisecond)
-	if await.OK || await.Code != CodePeerClosed {
-		t.Fatalf("await after sweep-close should be peer_closed: %+v", await)
-	}
 }
 
+// TestStateSweepEvictsExpiredAgentsFromRooms: room membership tracks agent
+// lifetime.
 func TestStateSweepEvictsExpiredAgentsFromRooms(t *testing.T) {
 	t.Setenv("LESCHE_WORKSPACE", filepath.Join(t.TempDir(), "workspace"))
 	s := newFixtureState()
@@ -231,26 +306,15 @@ func TestStateSweepEvictsExpiredAgentsFromRooms(t *testing.T) {
 
 	s.sweep()
 
-	s.mu.Lock()
-	_, aliceStill := s.agents["alice"]
-	_, bobStill := s.agents["bob"]
-	s.mu.Unlock()
-	if aliceStill {
-		t.Fatalf("alice should have expired and been removed from agents")
-	}
-	if !bobStill {
-		t.Fatalf("bob should still be active")
-	}
-
 	room.mu.Lock()
 	_, aliceMember := room.members["alice"]
 	_, bobMember := room.members["bob"]
 	room.mu.Unlock()
 	if aliceMember {
-		t.Fatalf("alice should have been evicted from room membership")
+		t.Fatalf("alice should have been evicted")
 	}
 	if !bobMember {
-		t.Fatalf("bob should remain in room membership")
+		t.Fatalf("bob should remain")
 	}
 
 	if len(s.writes) == 0 {

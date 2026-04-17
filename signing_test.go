@@ -54,71 +54,42 @@ func TestSigningRegisterCreatesAndReusesKey(t *testing.T) {
 	}
 }
 
-func TestSigningSendWithValidSignatureSucceeds(t *testing.T) {
+// TestSigningTellWithValidSignatureSucceeds verifies a signed tell round-trips
+// and the peer can read it.
+func TestSigningTellWithValidSignatureSucceeds(t *testing.T) {
 	lescheHome := setupIntegrationEnv(t)
 	defer stopDaemonForHome(t, lescheHome)
 
 	mustRequest(t, "register", map[string]any{"name": "alice", "pid": float64(301)})
 	mustRequest(t, "register", map[string]any{"name": "bob", "pid": float64(302)})
 
-	open := mustRequest(t, "tunnel", map[string]any{"from": "alice", "peer": "bob"})
-	if !open.OK {
-		t.Fatalf("open tunnel failed: %+v", open)
+	tell := mustRequest(t, "tell", map[string]any{"from": "alice", "peer": "bob", "body": "signed hello"})
+	if !tell.OK {
+		t.Fatalf("signed tell failed: %+v", tell)
 	}
-	sid := sidFrom(open)
-
-	bobDone := make(chan requestResult, 1)
-	go func() {
-		first, err := request("await", map[string]any{"from": "bob", "sid": sid, "timeout": float64(3)})
-		if err != nil {
-			bobDone <- requestResult{err: err}
-			return
-		}
-		if !first.OK {
-			bobDone <- requestResult{resp: first}
-			return
-		}
-		body, _ := first.Data.(map[string]any)["body"].(string)
-		if body != "signed hello" {
-			bobDone <- requestResult{resp: &Response{Error: "unexpected body: " + body}}
-			return
-		}
-		r, err := request("send", map[string]any{"from": "bob", "sid": sid, "body": "signed ack", "timeout": float64(1)})
-		bobDone <- requestResult{resp: r, err: err}
-	}()
-
-	aliceSend := mustRequest(t, "send", map[string]any{"from": "alice", "sid": sid, "body": "signed hello", "timeout": float64(3)})
-	if !aliceSend.OK {
-		t.Fatalf("alice signed send failed: %+v", aliceSend)
+	read := mustRequest(t, "read", map[string]any{"from": "bob", "peer": "alice", "timeout": float64(1)})
+	if !read.OK {
+		t.Fatalf("signed read failed: %+v", read)
 	}
-	if got := aliceSend.Data.(map[string]any)["body"].(string); got != "signed ack" {
-		t.Fatalf("alice send returned body=%q, want signed ack", got)
-	}
-
-	bobRes := <-bobDone
-	if bobRes.err != nil {
-		t.Fatalf("bob path error: %v", bobRes.err)
-	}
-	if bobRes.resp.OK || bobRes.resp.Code != CodeTimeout {
-		t.Fatalf("bob send should timeout waiting for follow-up: %+v", bobRes.resp)
+	if got := read.Data.(map[string]any)["body"].(string); got != "signed hello" {
+		t.Fatalf("body=%q, want signed hello", got)
 	}
 }
 
-func TestSigningSendMissingKeyFailsClientSide(t *testing.T) {
+// TestSigningTellMissingKeyFailsClientSide removes alice's key and verifies
+// the client refuses to sign.
+func TestSigningTellMissingKeyFailsClientSide(t *testing.T) {
 	lescheHome := setupIntegrationEnv(t)
 	defer stopDaemonForHome(t, lescheHome)
 
 	mustRequest(t, "register", map[string]any{"name": "alice", "pid": float64(401)})
 	mustRequest(t, "register", map[string]any{"name": "bob", "pid": float64(402)})
 
-	open := mustRequest(t, "tunnel", map[string]any{"from": "alice", "peer": "bob"})
-	sid := sidFrom(open)
-
 	if err := os.Remove(keyPath("alice")); err != nil {
 		t.Fatalf("remove alice key: %v", err)
 	}
 
-	resp, err := request("send", map[string]any{"from": "alice", "sid": sid, "body": "won't send", "timeout": float64(1)})
+	resp, err := request("tell", map[string]any{"from": "alice", "peer": "bob", "body": "won't send"})
 	if err == nil {
 		t.Fatalf("expected client-side key load error, got resp=%+v", resp)
 	}
@@ -127,14 +98,14 @@ func TestSigningSendMissingKeyFailsClientSide(t *testing.T) {
 	}
 }
 
-func TestSigningSendWrongKeyRejectedByServer(t *testing.T) {
+// TestSigningTellWrongKeyRejectedByServer swaps alice's key for a fresh
+// unrelated pair; the daemon must reject the signature.
+func TestSigningTellWrongKeyRejectedByServer(t *testing.T) {
 	lescheHome := setupIntegrationEnv(t)
 	defer stopDaemonForHome(t, lescheHome)
 
 	mustRequest(t, "register", map[string]any{"name": "alice", "pid": float64(501)})
 	mustRequest(t, "register", map[string]any{"name": "bob", "pid": float64(502)})
-	open := mustRequest(t, "tunnel", map[string]any{"from": "alice", "peer": "bob"})
-	sid := sidFrom(open)
 
 	_, badPriv, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
@@ -144,12 +115,12 @@ func TestSigningSendWrongKeyRejectedByServer(t *testing.T) {
 		t.Fatalf("overwrite alice key: %v", err)
 	}
 
-	resp, err := request("send", map[string]any{"from": "alice", "sid": sid, "body": "forged", "timeout": float64(1)})
+	resp, err := request("tell", map[string]any{"from": "alice", "peer": "bob", "body": "forged"})
 	if err != nil {
-		t.Fatalf("unexpected client error on wrong-key send: %v", err)
+		t.Fatalf("unexpected client error on wrong-key tell: %v", err)
 	}
 	if resp.OK || resp.Code != CodeUnauthorized {
-		t.Fatalf("wrong-key send should be unauthorized: %+v", resp)
+		t.Fatalf("wrong-key tell should be unauthorized: %+v", resp)
 	}
 	if !strings.Contains(resp.Error, "signature rejected") {
 		t.Fatalf("expected signature rejected error, got: %q", resp.Error)

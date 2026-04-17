@@ -26,10 +26,12 @@ type Room struct {
 	CreatedAt time.Time
 
 	seq int
+	log []RoomMessage
 
 	members map[string]bool
 	mailbox map[string][]RoomMessage
 	dropped map[string]int
+	waiter  map[string]chan RoomMessage
 
 	mu sync.Mutex
 }
@@ -44,6 +46,7 @@ func newRoom(name, desc, createdBy string) *Room {
 		members:   map[string]bool{createdBy: true},
 		mailbox:   make(map[string][]RoomMessage),
 		dropped:   make(map[string]int),
+		waiter:    make(map[string]chan RoomMessage),
 	}
 }
 
@@ -177,6 +180,7 @@ func (s *State) opLeave(req Request) Response {
 	delete(r.members, from)
 	delete(r.mailbox, from)
 	delete(r.dropped, from)
+	delete(r.waiter, from)
 	r.mu.Unlock()
 
 	s.persistRoomMembers(r)
@@ -248,8 +252,22 @@ func (s *State) opPost(req Request) Response {
 		TS:   time.Now(),
 		Body: body,
 	}
+	r.log = append(r.log, msg)
+	// Deliver to each member: prefer room-specific waiter; else cross-channel
+	// any-waiter; else bounded mailbox with drop-oldest policy. All delivery
+	// happens under r.mu so per-sender FIFO is preserved across concurrent posts.
+	// Safe: deliverAny takes s.mu briefly, but no code path takes s.mu→r.mu
+	// while holding both, so no inversion.
 	for member := range r.members {
 		if member == from {
+			continue
+		}
+		if ch, ok := r.waiter[member]; ok {
+			ch <- msg
+			delete(r.waiter, member)
+			continue
+		}
+		if s.deliverAny(member, "room", r.Name, toPeerMsg(msg)) {
 			continue
 		}
 		q := r.mailbox[member]
@@ -273,86 +291,81 @@ func (s *State) opPost(req Request) Response {
 	}}
 }
 
-func (s *State) opInbox(req Request) Response {
-	return s.opRoomRead(req, true)
+// toPeerMsg converts a RoomMessage into the generic Message shape used by
+// deliverAny / read-any. Room-specific fields are lost; the any-waiter has
+// target=room name to disambiguate.
+func toPeerMsg(rm RoomMessage) Message {
+	return Message{
+		Seq:  rm.Seq,
+		From: rm.From,
+		TS:   rm.TS,
+		Body: rm.Body,
+	}
 }
 
-func (s *State) opPeek(req Request) Response {
-	return s.opRoomRead(req, false)
-}
-
-func (s *State) opRoomRead(req Request, consume bool) Response {
-	from, _ := req.Args["from"].(string)
-	roomArg, _ := req.Args["room"].(string)
-	if from == "" {
-		return Response{Error: "from required"}
-	}
-
-	if roomArg != "" {
-		out, code, err := s.readRoomForMember(from, roomArg, consume)
-		if err != "" {
-			return Response{Error: err, Code: code}
-		}
-		return Response{OK: true, Data: map[string]any{"room": roomArg, "messages": out}}
-	}
-
-	s.mu.Lock()
-	rooms := make([]*Room, 0, len(s.rooms))
-	for _, r := range s.rooms {
-		rooms = append(rooms, r)
-	}
-	s.mu.Unlock()
-
-	sort.Slice(rooms, func(i, j int) bool { return rooms[i].Name < rooms[j].Name })
-	out := make([]any, 0, len(rooms))
-	for _, r := range rooms {
-		msgs, ok := readRoomMessages(r, from, consume)
-		if !ok || len(msgs) == 0 {
-			continue
-		}
-		out = append(out, map[string]any{
-			"room":     r.Name,
-			"messages": msgs,
-		})
-	}
-	return Response{OK: true, Data: out}
-}
-
-func (s *State) readRoomForMember(from, room string, consume bool) ([]any, int, string) {
+// roomRead drains all pending messages for the caller from the named room.
+// With timeout > 0 it blocks up to timeout for the first message to arrive,
+// then drains whatever else accumulated. With timeout == 0 it returns
+// immediately with whatever is there (possibly empty). On consume, the
+// dropped counter resets and a "notice" entry is prepended if any messages
+// were previously dropped.
+func (s *State) roomRead(from, room string, timeout time.Duration) Response {
 	s.mu.Lock()
 	r, ok := s.rooms[room]
 	s.mu.Unlock()
 	if !ok {
-		return nil, CodeNotFound, "room not found: " + room
+		return Response{Error: "room not found: " + room, Code: CodeNotFound}
 	}
-	msgs, member := readRoomMessages(r, from, consume)
-	if !member {
-		return nil, CodeNotFound, "room not found: " + room
+	r.mu.Lock()
+	if !r.members[from] {
+		r.mu.Unlock()
+		return Response{Error: "room not found: " + room, Code: CodeNotFound}
 	}
-	return msgs, 0, ""
+	if q, ok := r.mailbox[from]; ok && len(q) > 0 {
+		dropped := r.dropped[from]
+		r.mailbox[from] = nil
+		r.dropped[from] = 0
+		r.mu.Unlock()
+		return roomDrainResponse(room, q, dropped)
+	}
+	if timeout <= 0 {
+		r.mu.Unlock()
+		return Response{OK: true, Data: map[string]any{"room": room, "messages": []any{}}}
+	}
+	if _, exists := r.waiter[from]; exists {
+		r.mu.Unlock()
+		return Response{Error: "another read already pending for " + from + " on room " + room, Code: CodeError}
+	}
+	ch := make(chan RoomMessage, 1)
+	r.waiter[from] = ch
+	r.mu.Unlock()
+
+	select {
+	case first := <-ch:
+		// Drain any additional messages that arrived between signal and here.
+		r.mu.Lock()
+		extra := r.mailbox[from]
+		r.mailbox[from] = nil
+		dropped := r.dropped[from]
+		r.dropped[from] = 0
+		r.mu.Unlock()
+		all := append([]RoomMessage{first}, extra...)
+		return roomDrainResponse(room, all, dropped)
+	case <-time.After(timeout):
+		r.mu.Lock()
+		delete(r.waiter, from)
+		r.mu.Unlock()
+		return Response{OK: true, Data: map[string]any{"room": room, "messages": []any{}}}
+	}
 }
 
-func readRoomMessages(r *Room, member string, consume bool) ([]any, bool) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
-	if !r.members[member] {
-		return nil, false
-	}
-
-	queue := append([]RoomMessage(nil), r.mailbox[member]...)
-	dropped := r.dropped[member]
-	if consume {
-		r.mailbox[member] = nil
-		r.dropped[member] = 0
-	}
-
-	out := make([]any, 0, len(queue)+1)
-	if consume && dropped > 0 {
+func roomDrainResponse(room string, msgs []RoomMessage, dropped int) Response {
+	out := make([]any, 0, len(msgs)+1)
+	if dropped > 0 {
 		out = append(out, map[string]any{
 			"seq":     0,
 			"type":    "notice",
-			"room":    r.Name,
+			"room":    room,
 			"from":    "system",
 			"ts":      time.Now().Format(time.RFC3339),
 			"body":    fmt.Sprintf("you are behind, %d dropped", dropped),
@@ -360,6 +373,35 @@ func readRoomMessages(r *Room, member string, consume bool) ([]any, bool) {
 			"dropped": dropped,
 		})
 	}
+	for _, m := range msgs {
+		out = append(out, map[string]any{
+			"type": "message",
+			"seq":  m.Seq,
+			"room": m.Room,
+			"from": m.From,
+			"ts":   m.TS.Format(time.RFC3339),
+			"body": m.Body,
+		})
+	}
+	return Response{OK: true, Data: map[string]any{"room": room, "messages": out}}
+}
+
+// roomPeek returns all pending messages without consuming. Does not clear
+// the dropped counter.
+func (s *State) roomPeek(from, room string) Response {
+	s.mu.Lock()
+	r, ok := s.rooms[room]
+	s.mu.Unlock()
+	if !ok {
+		return Response{Error: "room not found: " + room, Code: CodeNotFound}
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if !r.members[from] {
+		return Response{Error: "room not found: " + room, Code: CodeNotFound}
+	}
+	queue := r.mailbox[from]
+	out := make([]any, 0, len(queue))
 	for _, m := range queue {
 		out = append(out, map[string]any{
 			"type": "message",
@@ -370,7 +412,39 @@ func readRoomMessages(r *Room, member string, consume bool) ([]any, bool) {
 			"body": m.Body,
 		})
 	}
-	return out, true
+	return Response{OK: true, Data: map[string]any{"room": room, "messages": out, "dropped": r.dropped[from]}}
+}
+
+// roomHistory returns the full room transcript (not just caller's mailbox)
+// if the caller is a member.
+func (s *State) roomHistory(from, room string, since, limit int) Response {
+	s.mu.Lock()
+	r, ok := s.rooms[room]
+	s.mu.Unlock()
+	if !ok {
+		return Response{Error: "room not found: " + room, Code: CodeNotFound}
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if !r.members[from] {
+		return Response{Error: "room not found: " + room, Code: CodeNotFound}
+	}
+	out := make([]any, 0, len(r.log))
+	for _, m := range r.log {
+		if since > 0 && m.Seq <= since {
+			continue
+		}
+		out = append(out, map[string]any{
+			"seq":  m.Seq,
+			"from": m.From,
+			"ts":   m.TS.Format(time.RFC3339),
+			"body": m.Body,
+		})
+	}
+	if limit > 0 && len(out) > limit {
+		out = out[len(out)-limit:]
+	}
+	return Response{OK: true, Data: map[string]any{"room": room, "messages": out}}
 }
 
 func (r *Room) removeMembers(names map[string]struct{}) bool {
@@ -382,6 +456,7 @@ func (r *Room) removeMembers(names map[string]struct{}) bool {
 			delete(r.members, name)
 			delete(r.mailbox, name)
 			delete(r.dropped, name)
+			delete(r.waiter, name)
 			changed = true
 		}
 	}

@@ -36,24 +36,20 @@ func main() {
 		cmdParticipants(os.Args[2:])
 	case "post":
 		cmdPost(os.Args[2:])
-	case "inbox":
-		cmdInbox(os.Args[2:])
+	case "tell":
+		cmdTell(os.Args[2:])
+	case "ask":
+		cmdAsk(os.Args[2:])
+	case "read":
+		cmdRead(os.Args[2:])
 	case "peek":
 		cmdPeek(os.Args[2:])
-	case "tunnel":
-		cmdTunnel(os.Args[2:])
-	case "send":
-		cmdSend(os.Args[2:])
-	case "await":
-		cmdAwait(os.Args[2:])
-	case "close":
-		cmdClose(os.Args[2:])
-	case "sessions":
-		cmdSessions(os.Args[2:])
+	case "read-any":
+		cmdReadAny(os.Args[2:])
+	case "channels":
+		cmdChannels(os.Args[2:])
 	case "history":
 		cmdHistory(os.Args[2:])
-	case "await-any":
-		cmdAwaitAny(os.Args[2:])
 	case "renew":
 		cmdRenew(os.Args[2:])
 	case "stop":
@@ -72,36 +68,48 @@ func main() {
 func usage() {
 	fmt.Fprintf(os.Stderr, `lesche - agent-to-agent coordination
 
+Peer-to-peer (English intent → command):
+  tell X       = one-way notification / "notify, publish, inform"
+  ask X        = question expecting answer / "ask, check with, query"
+  read X       = pull next inbound from X (blocks with --timeout)
+  peek X       = inspect pending without consuming
+  read-any     = pull next inbound from ANY channel or room you're in
+
+Rooms (N-party):
+  post R       = broadcast / "announce, share with the room"
+  read R --room = pull next from room R (blocks with --timeout)
+  peek R --room = inspect room mailbox
+
 Usage:
   lesche register [--name <name>]
   lesche agents
-  lesche rooms
+  lesche channels                        list your peer-pair channels
+
+  lesche tell <peer> "<msg>"             async, no reply expected
+  lesche ask  <peer> "<msg>" [--timeout N]   send then block for reply
+  lesche read <peer|room> [--room] [--timeout N]   consume next inbound
+  lesche peek <peer|room> [--room]       non-destructive inspect
+  lesche read-any [--timeout N]          block on ANY channel or room
+
+  lesche rooms                           list known rooms
   lesche room create <name> [--desc <text>]
   lesche join <room>
   lesche leave <room>
   lesche participants <room>
-  lesche post <room> "<message>"
-  lesche inbox [<room>]
-  lesche peek <room>
-  lesche sessions            list open tunnels for caller
-  lesche history <sid> [--limit N] [--since SEQ]   read transcript of a tunnel you are in
-  lesche tunnel <peer>
-  lesche send <sid> "<message>" [--timeout N]
-  lesche await <sid> [--timeout N]
-  lesche await-any [--timeout N]    block until any tunnel has a message
-  lesche close <sid>
-  lesche renew               extend caller's lease
+  lesche post <room> "<msg>"             async broadcast
+
+  lesche history <peer|room> [--room] [--since SEQ] [--limit N]
+  lesche renew                           extend caller's lease
   lesche stop
-  lesche protocol            print agent-facing protocol guide
-  lesche --version           print version string
+  lesche protocol                        print agent-facing protocol guide
+  lesche --version
 
 Identity:
   On register, lesche generates an Ed25519 keypair for your name.
   Public key lives in the registry; private key at ~/.lesche/keys/<name>.key
   (mode 0600). Every authenticated request is signed by your key and
   verified by the daemon. Another process passing --as <your-name> without
-  your key will be rejected with exit code 6. Re-register to mint a fresh
-  key if you lose it.
+  your key will be rejected with exit code 6.
 
 Environment:
   LESCHE_NAME       caller identity for all commands (override per-call with --as)
@@ -111,13 +119,12 @@ Environment:
 Exit codes:
   0  ok
   1  generic error
-  2  timeout — tunnel still open; call send/await again to resume
-  3  peer_closed — peer hung up; conversation over
-  4  not_your_turn — wrong side of the FSM; call the other primitive
-  5  not_found — sid or peer name does not exist
+  2  timeout — read returned empty; call again to resume
+  3  peer_closed — daemon shutting down or lease expired mid-read
+  4  reserved (no longer produced; was "not_your_turn")
+  5  not_found — peer or room does not exist
   6  unauthorized — signature invalid or caller not registered
 
-Run "lesche protocol" for the full agent-facing guide (paste into your
-harness config so your LLM knows the rules).
+Run "lesche protocol" for the full agent-facing guide.
 `)
 }
