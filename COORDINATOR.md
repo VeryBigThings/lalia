@@ -56,31 +56,138 @@ touch**, cross-check them against the heat map, and if you see
 collisions announce them in a lesche tunnel to `claude-coordinator`
 before writing.
 
-## How to coordinate
+## If you are a worker agent — bootstrap
 
-All agents coordinate through lesche itself. The daemon is already
-running at `~/.lesche/sock`. Sequence at session start:
+You are a worker if the human told you "you are a worker" or
+assigned you a specific branch/workstream. The coordinator agent
+(`claude-coordinator`) is run separately and drives review + merge.
+
+### 1. Identity
+
+Pick the identity that matches your harness. The human has agreed
+on these three names and nothing else:
+
+- `copilot` — for the GitHub Copilot harness.
+- `codex` — for the GPT-5 / Codex CLI harness.
+- `claude-code` — for the Claude Code harness.
+
+Set it once per shell:
 
 ```
-export LESCHE_NAME=<your-agent-name>    # e.g. copilot, codex, claude-code
-./lesche register                        # idempotent; mints/reuses your key
-./lesche agents                          # see who else is registered
-./lesche tunnel claude-coordinator       # announce start-of-work
+export LESCHE_NAME=<your-name>
 ```
 
-Announce at these moments:
-- Starting a workstream (so the coordinator knows you're live).
-- Hitting an open question in your scope entry (don't guess; ask).
-- Needing to touch a file outside your heat-map column (collision
-  check before writing).
-- "Ready for review" — include branch name, commit SHA, `make test`
+Do not invent a new name. Do not use `claude`, `claude-coordinator`,
+`sonnet`, or any variant — those either collide with the coordinator
+or are reserved. If your harness has already been handed a different
+name by the human, use that instead and tell the coordinator on your
+first tunnel message.
+
+### 2. Register
+
+The lesche daemon is already running at `~/.lesche/sock`. Register
+yourself — idempotent, reuses your existing Ed25519 key if you
+registered in a previous session:
+
+```
+./lesche register
+./lesche agents                # sanity-check: see who else is online
+```
+
+If you see `claude-coordinator` in the agents list, the coordinator
+is up and expecting you. If not, wait and re-run `./lesche agents`
+every minute or so until it shows up.
+
+### 3. Announce yourself
+
+Open a tunnel to the coordinator and state, in one message, exactly
+these things:
+
+- Your harness (`copilot` / `codex` / `claude-code`).
+- The workstream you were assigned (or "unassigned, awaiting
+  direction").
+- Confirmation that you have read `COORDINATOR.md` (or a question
+  if you haven't and don't understand it).
+- Any blockers before you start (e.g. nickname storage question
+  for `feat/identity`).
+
+```
+./lesche tunnel claude-coordinator
+# prints sid=<session-id>
+./lesche send <sid> "harness: codex. assigned feat/keychain. COORDINATOR.md read. no blockers."
+```
+
+### 4. Receive messages from the coordinator
+
+The coordinator may open a tunnel to you before you open one to
+them. To receive anything arriving on any tunnel you are party to:
+
+```
+./lesche await-any --timeout 300
+# prints sid=<session-id> then the message body
+```
+
+`await-any` blocks until something arrives. On a new tunnel opened
+by the coordinator, this is how you learn the sid. After you read
+the first message, reply on that sid:
+
+```
+./lesche send <sid> "<your reply>"
+```
+
+If you already know the sid (because you opened the tunnel, or
+because `./lesche sessions` shows it), block on just that tunnel:
+
+```
+./lesche await <sid> --timeout 300
+```
+
+### 5. Keep your lease alive
+
+Leases are 10 minutes; any command renews. If your harness sits
+idle writing code without calling lesche for longer than that, your
+tunnels close with `peer lease expired` on the coordinator's side
+and the coordinator has to chase you. Two habits that prevent this:
+
+- Call `./lesche renew` right before a long run of edits.
+- Or just run `./lesche sessions` occasionally — it renews too.
+
+There is a known issue (see "Spot patch" below) that the default
+lease is too short; one of the current-batch workstreams will raise
+it to 30+ minutes. Until then, renew explicitly.
+
+### 6. Announce key moments
+
+Open a tunnel and send a message to `claude-coordinator` at these
+checkpoints:
+
+- **Start of work** — confirmed in step 3.
+- **Open question in your scope entry** — don't guess; ask.
+- **Need to touch a file outside your heat-map column** — collision
+  check before writing.
+- **Ready for review** — branch name, commit SHA, `make test`
   summary, any bugs found-but-not-fixed, any new env vars or
   commands added.
 
-Leases are 10 minutes; any command renews. If you go idle longer
-than that your tunnels close with `peer lease expired`. Run
-`./lesche renew` if you are about to sit idle, or just run any
-command periodically.
+### Minimal loop if you get stuck
+
+Worker session template; safe to run verbatim after step 1:
+
+```
+export LESCHE_NAME=<your-name>
+./lesche register
+./lesche agents | grep claude-coordinator || echo "coordinator not up"
+./lesche sessions                       # anything already waiting?
+./lesche await-any --timeout 60         # or open your own tunnel
+```
+
+If `await-any` times out and `sessions` shows no tunnels, open one
+yourself per step 3.
+
+## How to coordinate (general)
+
+All agents coordinate through lesche itself. Full protocol guide:
+run `./lesche protocol`. Full help: `./lesche help`.
 
 ## Current state (snapshot at commit e4e7186)
 
