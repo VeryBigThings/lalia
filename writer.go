@@ -9,6 +9,7 @@ import (
 
 type writeOp struct {
 	queueID   int64 // SQLite row ID; 0 means not persisted to queue
+	attempts  int   // local copy of queue.attempts for dead-letter threshold check
 	relPath   string
 	content   []byte
 	commitMsg string
@@ -43,6 +44,12 @@ func ensureWorkspace() error {
 // enqueueWrite inserts the op into the SQLite queue synchronously (so it is
 // durable before we return to the caller), then forwards it to the writer
 // goroutine for async git commit.
+//
+// If the SQLite insert fails the write is still forwarded to the in-memory
+// channel as a best-effort fallback: the write will be attempted but will NOT
+// survive a daemon crash. This is an explicit graceful-degradation path — the
+// caller's request is not failed. If stronger guarantees are required, callers
+// should treat a non-zero queueID in the op as the durability signal.
 func (s *State) enqueueWrite(relPath string, content []byte, commitMsg string) {
 	op := writeOp{relPath: relPath, content: content, commitMsg: commitMsg}
 	if s.queue != nil {
@@ -81,6 +88,7 @@ func (s *State) runWriter() {
 			for _, r := range rows {
 				s.commitWrite(ws, writeOp{
 					queueID:   r.id,
+					attempts:  r.attempts,
 					relPath:   r.relPath,
 					content:   r.content,
 					commitMsg: r.commitMsg,
@@ -95,22 +103,48 @@ func (s *State) runWriter() {
 }
 
 // commitWrite writes the file, commits it to git, then removes the queue row.
+// On failure the queue row is left in place so the next startup can replay it.
+// After maxAttempts failures the row is moved to queue_dead to prevent
+// infinite replay loops caused by persistent errors (corrupt git repo, FS full,
+// bad relPath, etc.).
 func (s *State) commitWrite(ws string, op writeOp) {
+	fail := func(label string, detail string) {
+		fmt.Fprintf(os.Stderr, "%s: %s\n", label, detail)
+		if s.queue == nil || op.queueID <= 0 {
+			return
+		}
+		if err := s.queue.bumpAttempts(op.queueID); err != nil {
+			fmt.Fprintln(os.Stderr, "queue bump attempts:", err)
+			return
+		}
+		op.attempts++ // keep local copy in sync
+		if op.attempts >= maxAttempts {
+			fmt.Fprintf(os.Stderr, "queue: row %d failed %d times, moving to dead-letter\n", op.queueID, op.attempts)
+			if err := s.queue.deadLetter(queueRow{
+				id: op.queueID, relPath: op.relPath,
+				content: op.content, commitMsg: op.commitMsg,
+				attempts: op.attempts,
+			}); err != nil {
+				fmt.Fprintln(os.Stderr, "queue dead-letter:", err)
+			}
+		}
+	}
+
 	full := filepath.Join(ws, op.relPath)
 	if err := os.MkdirAll(filepath.Dir(full), 0700); err != nil {
-		fmt.Fprintln(os.Stderr, "mkdir:", err)
+		fail("mkdir", err.Error())
 		return
 	}
 	if err := os.WriteFile(full, op.content, 0600); err != nil {
-		fmt.Fprintln(os.Stderr, "write:", err)
+		fail("write", err.Error())
 		return
 	}
 	if out, err := exec.Command("git", "-C", ws, "add", op.relPath).CombinedOutput(); err != nil {
-		fmt.Fprintln(os.Stderr, "git add:", string(out), err)
+		fail("git add", string(out)+": "+err.Error())
 		return
 	}
 	if out, err := exec.Command("git", "-C", ws, "commit", "-q", "-m", op.commitMsg).CombinedOutput(); err != nil {
-		fmt.Fprintln(os.Stderr, "git commit:", string(out), err)
+		fail("git commit", string(out)+": "+err.Error())
 		return
 	}
 	// Delete from queue only after a successful git commit.

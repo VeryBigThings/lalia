@@ -205,3 +205,64 @@ func TestQueueDBFileCreated(t *testing.T) {
 		t.Errorf("expected queue.db at %s: %v", dbPath, err)
 	}
 }
+
+// TestQueueWALModeActive verifies that the SQLite database is actually running
+// in WAL journal mode (not the default rollback journal). This guards against
+// the DSN pragma syntax being silently ignored by the driver.
+func TestQueueWALModeActive(t *testing.T) {
+	q, _ := newTestQueue(t)
+
+	var mode string
+	row := q.db.QueryRow(`PRAGMA journal_mode`)
+	if err := row.Scan(&mode); err != nil {
+		t.Fatalf("PRAGMA journal_mode: %v", err)
+	}
+	if mode != "wal" {
+		t.Errorf("expected journal_mode=wal, got %q — DSN pragma may be silently ignored", mode)
+	}
+}
+
+// TestQueueDeadLetterAfterMaxAttempts verifies that a row is moved from queue
+// to queue_dead after maxAttempts failures, preventing infinite replay loops.
+func TestQueueDeadLetterAfterMaxAttempts(t *testing.T) {
+	q, _ := newTestQueue(t)
+
+	id, err := q.insert("bad/path.json", []byte("{}"), "poison pill")
+	if err != nil {
+		t.Fatalf("insert: %v", err)
+	}
+
+	// Simulate maxAttempts failures by bumping the counter repeatedly.
+	for i := 0; i < maxAttempts; i++ {
+		if err := q.bumpAttempts(id); err != nil {
+			t.Fatalf("bumpAttempts iteration %d: %v", i, err)
+		}
+	}
+
+	// Move to dead-letter.
+	rows, err := q.pending()
+	if err != nil || len(rows) != 1 {
+		t.Fatalf("expected 1 pending row before dead-letter: %v", err)
+	}
+	if err := q.deadLetter(rows[0]); err != nil {
+		t.Fatalf("deadLetter: %v", err)
+	}
+
+	// Queue must be empty.
+	live, err := q.pending()
+	if err != nil {
+		t.Fatalf("pending after dead-letter: %v", err)
+	}
+	if len(live) != 0 {
+		t.Fatalf("expected 0 live rows after dead-letter, got %d", len(live))
+	}
+
+	// Dead-letter table must have the row.
+	var count int
+	if err := q.db.QueryRow(`SELECT COUNT(*) FROM queue_dead WHERE id = ?`, id).Scan(&count); err != nil {
+		t.Fatalf("query queue_dead: %v", err)
+	}
+	if count != 1 {
+		t.Errorf("expected 1 row in queue_dead, got %d", count)
+	}
+}
