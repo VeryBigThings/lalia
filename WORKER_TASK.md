@@ -30,9 +30,6 @@ with one command. Three-level surface, same prompt content:
 3. `lesche run <role> --<harness> [...args]` → writes harness-specific
    file and execs the harness.
 
-Also: cascade the `manager` → `supervisor` rename through BACKLOG.md
-and workstream H's catalog entry so H inherits the new vocabulary.
-
 ## Surface
 
 ```
@@ -78,9 +75,6 @@ without `--force`.
 - **Modify**: `client.go` (cmdInit, cmdPrompt, cmdRun), `main.go`
   (dispatch), `help.go` (document all three commands — keep existing
   protocol help intact; add a short new section).
-- **Modify (rename cascade)**: `BACKLOG.md` — every `manager` →
-  `supervisor`; `ManagerBusy` error-code reference in H's entry
-  → `SupervisorBusy`. Same commit.
 
 ## Prompt content (5-part skeleton, both worker and supervisor)
 
