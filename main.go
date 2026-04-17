@@ -25,6 +25,12 @@ func main() {
 		cmdAwait(os.Args[2:])
 	case "close":
 		cmdClose(os.Args[2:])
+	case "sessions":
+		cmdSessions(os.Args[2:])
+	case "await-any":
+		cmdAwaitAny(os.Args[2:])
+	case "renew":
+		cmdRenew(os.Args[2:])
 	case "stop":
 		cmdStop(os.Args[2:])
 	case "protocol":
@@ -44,12 +50,15 @@ func usage() {
 Usage:
   lesche register [--name <name>]
   lesche agents
+  lesche sessions            list open tunnels for caller
   lesche tunnel <peer>
   lesche send <sid> "<message>" [--timeout N]
   lesche await <sid> [--timeout N]
+  lesche await-any [--timeout N]    block until any tunnel has a message
   lesche close <sid>
+  lesche renew               extend caller's lease
   lesche stop
-  lesche protocol        print agent-facing protocol guide
+  lesche protocol            print agent-facing protocol guide
 
 Environment:
   LESCHE_NAME       caller identity for all commands (override per-call with --as)

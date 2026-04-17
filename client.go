@@ -190,6 +190,66 @@ func cmdStop(_ []string) {
 	handle(resp, err, nil)
 }
 
+func cmdSessions(args []string) {
+	from := callerName(args)
+	if from == "" {
+		fmt.Fprintln(os.Stderr, "caller identity required (LESCHE_NAME or --as)")
+		os.Exit(1)
+	}
+	resp, err := request("sessions", map[string]any{"from": from})
+	handle(resp, err, func(data any) {
+		rows, ok := data.([]any)
+		if !ok || len(rows) == 0 {
+			return
+		}
+		for _, row := range rows {
+			m := row.(map[string]any)
+			turn := "your turn"
+			if !m["your_turn"].(bool) {
+				turn = fmt.Sprintf("%s's turn", m["turn"])
+			}
+			status := "open"
+			if m["closed"].(bool) {
+				status = "closed"
+			}
+			fmt.Printf("%s\tpeer=%s\t%s\t%s\tpending=%v\tmsgs=%v\n",
+				m["sid"], m["peer"], status, turn, m["pending_for_me"], m["msg_count"])
+		}
+	})
+}
+
+func cmdAwaitAny(args []string) {
+	from := callerName(args)
+	if from == "" {
+		fmt.Fprintln(os.Stderr, "caller identity required (LESCHE_NAME or --as)")
+		os.Exit(1)
+	}
+	timeout := parseIntFlag(args, "--timeout", 300)
+	resp, err := request("await-any", map[string]any{"from": from, "timeout": timeout})
+	handle(resp, err, func(data any) {
+		m := data.(map[string]any)
+		fmt.Printf("sid=%s\n", m["sid"])
+		body := m["body"].(string)
+		fmt.Print(body)
+		if len(body) == 0 || body[len(body)-1] != '\n' {
+			fmt.Println()
+		}
+	})
+}
+
+func cmdRenew(args []string) {
+	from := callerName(args)
+	if from == "" {
+		fmt.Fprintln(os.Stderr, "caller identity required (LESCHE_NAME or --as)")
+		os.Exit(1)
+	}
+	resp, err := request("renew", map[string]any{"from": from})
+	handle(resp, err, func(data any) {
+		m := data.(map[string]any)
+		fmt.Printf("expires_at=%s\n", m["expires_at"])
+	})
+}
+
 func handle(resp *Response, err error, ok func(any)) {
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)

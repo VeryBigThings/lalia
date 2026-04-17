@@ -44,6 +44,7 @@ func runDaemon() {
 		os.Exit(1)
 	}
 	go st.runWriter()
+	st.startSweeper()
 
 	// signal handler for clean shutdown
 	sigs := make(chan os.Signal, 1)

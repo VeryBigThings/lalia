@@ -85,10 +85,12 @@ func (t *Tunnel) send(s *State, from, body string, timeout time.Duration) Respon
 		fmt.Sprintf("msg %d in %s from %s", msg.Seq, t.SID, from),
 	)
 
-	// deliver to peer: signal waiter if any, else buffer
+	// deliver to peer: per-tunnel waiter wins over any-waiter; else any-waiter; else buffer.
 	if ch, ok := t.waiter[peer]; ok {
 		ch <- waitResult{msg: &msg}
 		delete(t.waiter, peer)
+	} else if s.deliverAny(peer, t.SID, msg) {
+		// delivered to an await-any caller; nothing else to do.
 	} else {
 		t.mailbox[peer] = append(t.mailbox[peer], msg)
 	}

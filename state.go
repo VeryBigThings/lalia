@@ -7,32 +7,125 @@ import (
 )
 
 type Agent struct {
-	Name      string    `json:"name"`
-	PID       int       `json:"pid"`
-	StartedAt time.Time `json:"started_at"`
+	Name       string    `json:"name"`
+	PID        int       `json:"pid"`
+	StartedAt  time.Time `json:"started_at"`
+	LastSeenAt time.Time `json:"last_seen_at"`
+	ExpiresAt  time.Time `json:"expires_at"`
 }
+
+// Lease duration. Any command from the agent renews; sweeper drops expired.
+const leaseTTL = 10 * time.Minute
+const sweepInterval = 30 * time.Second
 
 type State struct {
 	mu      sync.Mutex
 	agents  map[string]*Agent
 	tunnels map[string]*Tunnel
 
+	// state-level any-waiters: one per agent, 1-buffered
+	anyWaiter map[string]chan anyMsg
+
 	writes chan writeOp
 	wg     sync.WaitGroup
 	stop   chan struct{}
 }
 
+type anyMsg struct {
+	sid string
+	msg Message
+}
+
 func newState() (*State, error) {
 	s := &State{
-		agents:  make(map[string]*Agent),
-		tunnels: make(map[string]*Tunnel),
-		writes:  make(chan writeOp, 128),
-		stop:    make(chan struct{}),
+		agents:    make(map[string]*Agent),
+		tunnels:   make(map[string]*Tunnel),
+		anyWaiter: make(map[string]chan anyMsg),
+		writes:    make(chan writeOp, 128),
+		stop:      make(chan struct{}),
 	}
 	if err := ensureWorkspace(); err != nil {
 		return nil, err
 	}
+	if err := s.loadRegistry(); err != nil {
+		return nil, err
+	}
 	return s, nil
+}
+
+// renewLease extends the lease on an agent and updates last-seen.
+// Called on every request that carries a "from" identity.
+// Writes the updated record back to the workspace asynchronously.
+func (s *State) renewLease(name string) {
+	if name == "" {
+		return
+	}
+	s.mu.Lock()
+	a, ok := s.agents[name]
+	if !ok {
+		s.mu.Unlock()
+		return
+	}
+	now := time.Now()
+	a.LastSeenAt = now
+	a.ExpiresAt = now.Add(leaseTTL)
+	snapshot := *a
+	s.mu.Unlock()
+	s.persistAgent(&snapshot)
+}
+
+// startSweeper runs a goroutine that drops expired agents and closes their tunnels.
+func (s *State) startSweeper() {
+	s.wg.Add(1)
+	go func() {
+		defer s.wg.Done()
+		tick := time.NewTicker(sweepInterval)
+		defer tick.Stop()
+		for {
+			select {
+			case <-s.stop:
+				return
+			case <-tick.C:
+				s.sweep()
+			}
+		}
+	}()
+}
+
+func (s *State) sweep() {
+	now := time.Now()
+	s.mu.Lock()
+	var expired []string
+	for name, a := range s.agents {
+		if now.After(a.ExpiresAt) {
+			expired = append(expired, name)
+		}
+	}
+	if len(expired) == 0 {
+		s.mu.Unlock()
+		return
+	}
+	// close tunnels involving expired peers
+	var doomedTunnels []*Tunnel
+	for _, t := range s.tunnels {
+		for _, name := range expired {
+			if t.PeerA == name || t.PeerB == name {
+				doomedTunnels = append(doomedTunnels, t)
+				break
+			}
+		}
+	}
+	for _, name := range expired {
+		delete(s.agents, name)
+	}
+	s.mu.Unlock()
+
+	for _, t := range doomedTunnels {
+		t.close("peer lease expired")
+	}
+	for _, name := range expired {
+		s.removeAgentFile(name)
+	}
 }
 
 func (s *State) requestStop() {
@@ -53,17 +146,27 @@ func (s *State) requestStop() {
 func (s *State) waitWriterDone() { s.wg.Wait() }
 
 func (s *State) dispatch(req Request) Response {
+	// lease renewal on any request that carries a caller identity
+	if from, ok := req.Args["from"].(string); ok && from != "" {
+		s.renewLease(from)
+	}
 	switch req.Op {
 	case "register":
 		return s.opRegister(req)
 	case "agents":
 		return s.opAgents()
+	case "sessions":
+		return s.opSessions(req)
 	case "tunnel":
 		return s.opTunnel(req)
 	case "send":
 		return s.opSend(req)
 	case "await":
 		return s.opAwait(req)
+	case "await-any":
+		return s.opAwaitAny(req)
+	case "renew":
+		return s.opRenew(req)
 	case "close":
 		return s.opClose(req)
 	case "stop":
@@ -80,18 +183,156 @@ func (s *State) opRegister(req Request) Response {
 	if name == "" {
 		return Response{Error: "name required"}
 	}
+	now := time.Now()
 	s.mu.Lock()
-	defer s.mu.Unlock()
-	if existing, ok := s.agents[name]; ok {
-		if existing.PID == pid {
-			return Response{OK: true, Data: map[string]any{"name": name}}
-		}
-		existing.PID = pid
-		existing.StartedAt = time.Now()
-		return Response{OK: true, Data: map[string]any{"name": name}}
+	a, ok := s.agents[name]
+	if !ok {
+		a = &Agent{Name: name, StartedAt: now}
+		s.agents[name] = a
 	}
-	s.agents[name] = &Agent{Name: name, PID: pid, StartedAt: time.Now()}
-	return Response{OK: true, Data: map[string]any{"name": name}}
+	a.PID = pid
+	a.LastSeenAt = now
+	a.ExpiresAt = now.Add(leaseTTL)
+	snapshot := *a
+	s.mu.Unlock()
+	s.persistAgent(&snapshot)
+	return Response{OK: true, Data: map[string]any{
+		"name":       name,
+		"expires_at": snapshot.ExpiresAt.Format(time.RFC3339),
+	}}
+}
+
+func (s *State) opRenew(req Request) Response {
+	from, _ := req.Args["from"].(string)
+	if from == "" {
+		return Response{Error: "from required"}
+	}
+	s.mu.Lock()
+	a, ok := s.agents[from]
+	if !ok {
+		s.mu.Unlock()
+		return Response{Error: "not registered: " + from, Code: CodeNotFound}
+	}
+	now := time.Now()
+	a.LastSeenAt = now
+	a.ExpiresAt = now.Add(leaseTTL)
+	snapshot := *a
+	s.mu.Unlock()
+	s.persistAgent(&snapshot)
+	return Response{OK: true, Data: map[string]any{
+		"expires_at": snapshot.ExpiresAt.Format(time.RFC3339),
+	}}
+}
+
+func (s *State) opSessions(req Request) Response {
+	from, _ := req.Args["from"].(string)
+	if from == "" {
+		return Response{Error: "from required"}
+	}
+	s.mu.Lock()
+	out := []any{}
+	for _, t := range s.tunnels {
+		if t.PeerA != from && t.PeerB != from {
+			continue
+		}
+		t.mu.Lock()
+		peer := t.PeerB
+		if from == t.PeerB {
+			peer = t.PeerA
+		}
+		pendingCount := len(t.mailbox[from])
+		out = append(out, map[string]any{
+			"sid":            t.SID,
+			"peer":           peer,
+			"turn":           t.turn,
+			"your_turn":      t.turn == from,
+			"closed":         t.closed,
+			"pending_for_me": pendingCount,
+			"msg_count":      t.seq,
+		})
+		t.mu.Unlock()
+	}
+	s.mu.Unlock()
+	return Response{OK: true, Data: out}
+}
+
+func (s *State) opAwaitAny(req Request) Response {
+	from, _ := req.Args["from"].(string)
+	timeoutF, _ := req.Args["timeout"].(float64)
+	timeout := int(timeoutF)
+	if timeout <= 0 {
+		timeout = 300
+	}
+	if from == "" {
+		return Response{Error: "from required"}
+	}
+	// first pass: look for pending messages in any existing tunnel.
+	s.mu.Lock()
+	for _, t := range s.tunnels {
+		if t.PeerA != from && t.PeerB != from {
+			continue
+		}
+		t.mu.Lock()
+		if q := t.mailbox[from]; len(q) > 0 {
+			msg := q[0]
+			t.mailbox[from] = q[1:]
+			sid := t.SID
+			t.mu.Unlock()
+			s.mu.Unlock()
+			return Response{OK: true, Data: map[string]any{
+				"sid":  sid,
+				"seq":  msg.Seq,
+				"from": msg.From,
+				"body": msg.Body,
+				"ts":   msg.TS.Format(time.RFC3339),
+			}}
+		}
+		t.mu.Unlock()
+	}
+	// no pending; register any-waiter.
+	ch := make(chan anyMsg, 1)
+	if prev, ok := s.anyWaiter[from]; ok {
+		// another await-any already pending; displace with peer_closed-ish
+		// but simpler: reject second concurrent await-any.
+		_ = prev
+		s.mu.Unlock()
+		return Response{Error: "another await-any is already pending for " + from, Code: CodeError}
+	}
+	s.anyWaiter[from] = ch
+	s.mu.Unlock()
+
+	select {
+	case am := <-ch:
+		return Response{OK: true, Data: map[string]any{
+			"sid":  am.sid,
+			"seq":  am.msg.Seq,
+			"from": am.msg.From,
+			"body": am.msg.Body,
+			"ts":   am.msg.TS.Format(time.RFC3339),
+		}}
+	case <-time.After(time.Duration(timeout) * time.Second):
+		s.mu.Lock()
+		delete(s.anyWaiter, from)
+		s.mu.Unlock()
+		return Response{Error: "timeout waiting for any tunnel", Code: CodeTimeout}
+	}
+}
+
+// deliverAny signals the any-waiter for `to` with (sid, msg) if one exists.
+// Called by tunnel.send when it drops a message into `to`'s mailbox (no per-tunnel waiter).
+// Returns true if an any-waiter consumed the message (caller should then NOT enqueue to mailbox).
+func (s *State) deliverAny(to, sid string, msg Message) bool {
+	s.mu.Lock()
+	ch, ok := s.anyWaiter[to]
+	if ok {
+		delete(s.anyWaiter, to)
+	}
+	s.mu.Unlock()
+	if !ok {
+		return false
+	}
+	ch <- anyMsg{sid: sid, msg: msg}
+	return true
 }
 
 func (s *State) opAgents() Response {
@@ -100,9 +341,11 @@ func (s *State) opAgents() Response {
 	data := make([]any, 0, len(s.agents))
 	for _, a := range s.agents {
 		data = append(data, map[string]any{
-			"name":       a.Name,
-			"pid":        a.PID,
-			"started_at": a.StartedAt.Format(time.RFC3339),
+			"name":         a.Name,
+			"pid":          a.PID,
+			"started_at":   a.StartedAt.Format(time.RFC3339),
+			"last_seen_at": a.LastSeenAt.Format(time.RFC3339),
+			"expires_at":   a.ExpiresAt.Format(time.RFC3339),
 		})
 	}
 	return Response{OK: true, Data: data}
