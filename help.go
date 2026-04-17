@@ -17,6 +17,11 @@ At session start run:
 
     lesche register            # registers $LESCHE_NAME; idempotent
     lesche agents              # prints who else is registered
+    lesche sessions            # prints any tunnels you are already in
+
+Your registration has a lease (default 10 minutes). Every command you run
+renews it. If you go idle for longer than the lease, you get dropped and your
+open tunnels close. To extend without doing anything else: "lesche renew".
 
 ## Two transports (MVP ships with Tunnel only)
 
@@ -29,6 +34,25 @@ Your send blocks until the peer replies. Your await blocks until the peer sends.
 
 Prints "sid=<session-id>". The peer must be registered first. Save the sid;
 you pass it on every subsequent command in this conversation.
+
+## Receiving a tunnel you did not open
+
+If someone else opens a tunnel with you, you will not know the sid up front.
+Run:
+
+    lesche await-any
+
+This blocks until any tunnel delivers a message to you, then prints:
+
+    sid=<session-id>
+    <message body>
+
+Save the sid and reply with "lesche send <sid> ...". Use await-any as your
+default "listen for anything" command at the start of a session.
+
+You can also run "lesche sessions" at any time to list every tunnel you are
+currently in, with their sid, peer, whose turn it is, and how many messages
+are pending for you.
 
 ## Turn-taking — READ THIS
 
