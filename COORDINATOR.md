@@ -497,18 +497,36 @@ start reading — it stops holding live state.
 - Plan storage: `<workspace>/plans/<project-id>/plan.json`. Same write
   queue as registry / room writes.
 - Assignment shape: `{slug, goal, worktree, owner, status,
-  updated_at}` with status ∈ `open | assigned | in-progress |
-  ready | blocked | merged`.
+  kickoff, kickoff_delivered, updated_at}` with status ∈ `open |
+  assigned | in-progress | ready | blocked | merged`.
 - Manager-only mutations: `plan create <goal>`, `plan assign <slug>
-  <agent> --worktree <path> --goal "..."`, `plan unassign <slug>`,
-  `plan handoff <new-manager>`. `assign` verifies the worktree path
-  exists on the manager's machine before writing.
+  <agent> --worktree <path> --goal "..." [--kickoff "..."]`,
+  `plan unassign <slug>`, `plan handoff <new-manager>`. `assign`
+  verifies the worktree path exists on the manager's machine before
+  writing.
 - Worker self-service: `plan status <slug> in-progress|ready|blocked`
   flips the caller's own row only; daemon rejects writes to a row
   the caller does not own. `plan claim <slug>` verifies worktree
   exists on caller's machine, sets owner=self, status=in-progress.
 - Anyone can read: `plan show [--project <id>]` defaults to cwd's
   project; `plan list` returns plans where caller is manager or owner.
+- **Assignment-scoped rooms**: `plan assign` auto-creates a room
+  named after the slug, auto-joins manager + owner. All coordination
+  about the assignment happens there so context survives session
+  kills (git transcript, unbounded history). `plan handoff` rewires
+  room membership. Setting status to `merged` archives the room
+  (no new posts allowed, transcript kept; sweeper can reap the
+  room record after N days, or keep indefinitely — call it during
+  implementation).
+- **Pre-registration kickoff delivery**: if `plan assign` carries
+  `--kickoff`, the text is stored on the assignment with
+  `kickoff_delivered=false`. When the owner next calls `register`,
+  `opRegister` scans plans, finds undelivered kickoffs for this
+  agent, synthesizes a post from the manager into the assignment
+  room, and flips `kickoff_delivered=true`. Idempotent on
+  re-register. Solves "manager wants to assign work before the
+  worker harness is up" without weakening the `tell`
+  invariant that peers must be registered.
 
 **Files**: new `plan.go` (core), new `project.go` (git-remote →
 project-id resolver), `state.go` (new ops + role-gated dispatch
@@ -519,8 +537,11 @@ checks), `registry.go` (Role field on Agent, persist), `client.go`
 **Tests**: role persists across re-register; worker cannot mutate
 other workers' rows; worker can flip own status; manager cannot be
 unregistered while holding a non-empty plan; handoff atomically
-transfers manager rights; project id derivation from remote vs
-repo-basename; plan file round-trips through git.
+transfers manager rights (including room membership); project id
+derivation from remote vs repo-basename; plan file round-trips
+through git; assign auto-creates a room with the right members;
+merged status archives the room to read-only; kickoff is delivered
+on first register and not replayed on subsequent registers.
 
 **Blockers**: Heavy collision with A (identity) on `state.go`
 dispatch + `registry.go` Agent record. Both add fields; last-to-merge
