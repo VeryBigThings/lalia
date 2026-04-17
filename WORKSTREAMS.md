@@ -10,7 +10,7 @@ split couples two agents through a review loop on every change and
 defeats the point of parallelism. One agent owns a workstream
 end-to-end.
 
-## Current state (snapshot at commit 2cabb6a)
+## Current state (snapshot at commit e4e7186)
 
 **Shipped on main:**
 - Tunnel transport (2-party sync, turn FSM, git-backed transcript).
@@ -20,46 +20,54 @@ end-to-end.
 - Install pipeline: `make install` places binary on `$PATH`.
 - Protocol help (`lesche protocol`) and short help (`lesche help`)
   current for everything shipped.
-- Test suite: `state_test.go`, `tunnel_test.go`, `signing_test.go`,
-  `daemon_integration_test.go`. 13 tests via `make test`, 5.4s runtime.
+- Room mode (N-party pub/sub, bounded per-subscriber mailbox with
+  overflow notice, commands `rooms`, `room_create`, `join`, `leave`,
+  `participants`, `post`, `inbox`, `peek`). Merged at `e4e7186`.
+- SQLite write queue (crash-safe message persistence, WAL mode,
+  dead-letter after 3 failed commits). Merged at `d113b02`.
+- Test suite now 22 tests via `make test`, ~5.5s runtime.
 
 **Active branches (not on main):**
-- None right now. `feat/tests` merged at `2cabb6a`. Ready to start the
-  parallel batch below.
+- `feat/identity` — reassigned to Copilot (see below). Head still at
+  `a907186`; not started.
 
 **Designed, not implemented:**
-- `IDENTITY.md` — rich identity + nickname model.
-- Room mode (N-party pub/sub).
-- SQLite write queue, resumable blocking, structured error payloads,
-  keychain integration, multi-project workspace isolation,
-  cross-machine sync.
+- Resumable blocking, structured error payloads, keychain integration,
+  multi-project workspace isolation, cross-machine sync.
 
-## Current assignments (picked up after restart)
+## Current assignments
 
-We are about to start a 3-agent parallel batch. This is the authoritative
-list so any restarting session can recover context.
+Second batch after the rooms + write-queue merges. Identity is the only
+A-tier workstream remaining; handed to Copilot since they shipped the
+write queue with a tight review cycle and have fresh context on the
+coordinator tunnel protocol.
 
 | Agent | Branch | Workstream | Worktree path | Status |
 |-------|--------|------------|---------------|--------|
-| Claude Code | `feat/identity` | A. Identity refactor + nicknames | `~/Obolos/lesche-identity` | Not started |
-| GPT-5 via Codex | `feat/rooms` | B. Room mode (N-party) | `~/Obolos/lesche-rooms` | Not started. Rebase from `main@2cabb6a` on start. |
-| Copilot (to be booted) | `feat/write-queue` | C. SQLite write queue | `~/Obolos/lesche-write-queue` | Blocked on three open questions below. |
+| Copilot | `feat/identity` | A. Identity refactor + nicknames | `~/Obolos/lesche-identity` | Assigned. Branch head at `a907186`; rebase on `main@e4e7186` before starting. |
+| GPT-5 via Codex | — | — | — | feat/rooms merged at `e4e7186`. Idle; pick next workstream from the catalog below. |
+| Claude Code | — | — | — | Unassigned this batch. Pick next workstream from the catalog below. |
+
+Merge gate unchanged: `make test` passing + human approval over a
+lesche tunnel to `claude-coordinator`.
 
 Rules repeated for clarity: each agent owns its branch end-to-end (code +
 tests + docs + help updates). Merge gate is `make test` passing plus human
 approval over a lesche tunnel to `claude`.
 
-### Open questions blocking Copilot start
+### Settled design notes from the first batch
 
-1. **Copilot git identity on commits.** Own identity (matches Codex
-   pattern: `user.email=copilot@local`, `user.name=<whatever copilot
-   identifies as>`) or attributed to the human?
-2. **SQLite dependency.** Add `modernc.org/sqlite` (pure Go, preserves
-   static-binary story) or hand-roll an append-only WAL file?
-3. **Nickname storage location** if identity workstream ships first.
-   `IDENTITY.md` proposes `~/.lesche/nicknames.json` (outside workspace).
-   Alternative: in the workspace for git audit. Pick now so identity
-   workstream knows where to write.
+1. **Copilot git identity on commits.** Settled as
+   `user.email=copilot@local`, `user.name=Copilot`. Used on the
+   feat/write-queue and feat/rooms merges (codex's branch was also
+   committed under Copilot attribution on the shared machine; not
+   worth unwinding retroactively).
+2. **SQLite dependency.** `modernc.org/sqlite` — pure Go, no cgo,
+   static-binary story preserved. Shipped in write-queue.
+3. **Nickname storage location** still open; pick before feat/identity
+   starts. `IDENTITY.md` proposes `~/.lesche/nicknames.json` (outside
+   workspace). Alternative: in the workspace for git audit. Copilot
+   should surface this in the kickoff tunnel.
 
 ### UX issue flagged, not in a workstream yet
 
