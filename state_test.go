@@ -290,6 +290,61 @@ func TestStateSweepExpiresAgentAndReleasesWaiter(t *testing.T) {
 	}
 }
 
+// TestOpUnregisterReleasesWaitersAndEvicts: unregister drops the agent,
+// releases their hanging channel read with peer_closed, and evicts them
+// from rooms.
+func TestOpUnregisterReleasesWaitersAndEvicts(t *testing.T) {
+	t.Setenv("LESCHE_WORKSPACE", filepath.Join(t.TempDir(), "workspace"))
+	s := newFixtureState()
+	mustRegister(t, s, "alice", 1)
+	mustRegister(t, s, "bob", 2)
+
+	room := newRoom("ops", "", "alice")
+	room.members["bob"] = true
+	s.rooms["ops"] = room
+
+	ch := s.getOrCreateChannel("alice", "bob")
+	readDone := make(chan Response, 1)
+	go func() {
+		readDone <- ch.read("alice", 3*time.Second)
+	}()
+	time.Sleep(25 * time.Millisecond)
+
+	resp := s.opUnregister(Request{Args: map[string]any{"from": "alice"}})
+	if !resp.OK {
+		t.Fatalf("unregister failed: %+v", resp)
+	}
+
+	select {
+	case r := <-readDone:
+		if r.OK || r.Code != CodePeerClosed {
+			t.Fatalf("hanging read after unregister should be peer_closed: %+v", r)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatalf("hanging read did not return after unregister")
+	}
+
+	s.mu.Lock()
+	_, stillAgent := s.agents["alice"]
+	s.mu.Unlock()
+	if stillAgent {
+		t.Fatalf("alice should have been removed from agents")
+	}
+
+	room.mu.Lock()
+	_, stillMember := room.members["alice"]
+	room.mu.Unlock()
+	if stillMember {
+		t.Fatalf("alice should have been evicted from room")
+	}
+
+	// second unregister is a NotFound.
+	again := s.opUnregister(Request{Args: map[string]any{"from": "alice"}})
+	if again.OK || again.Code != CodeNotFound {
+		t.Fatalf("unregister twice should be not_found: %+v", again)
+	}
+}
+
 // TestStateSweepEvictsExpiredAgentsFromRooms: room membership tracks agent
 // lifetime.
 func TestStateSweepEvictsExpiredAgentsFromRooms(t *testing.T) {

@@ -122,6 +122,21 @@ func cmdRegister(args []string) {
 	})
 }
 
+// cmdUnregister removes the caller from the registry. Signed, so it
+// proves ownership of the key before releasing the name. The private
+// key file on disk is preserved so a later register reuses the same
+// identity.
+func cmdUnregister(args []string) {
+	from := mustCaller(args)
+	resp, err := request("unregister", map[string]any{"from": from})
+	handle(resp, err, func(data any) {
+		m, _ := data.(map[string]any)
+		if m != nil && m["name"] != nil {
+			fmt.Println(m["name"])
+		}
+	})
+}
+
 func cmdAgents(_ []string) {
 	resp, err := request("agents", nil)
 	handle(resp, err, func(data any) {

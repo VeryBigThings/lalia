@@ -207,6 +207,8 @@ func (s *State) dispatch(req Request) Response {
 	switch req.Op {
 	case "register":
 		return s.opRegister(req)
+	case "unregister":
+		return s.opUnregister(req)
 	case "agents":
 		return s.opAgents()
 	case "rooms":
@@ -273,6 +275,49 @@ func (s *State) opRegister(req Request) Response {
 		"expires_at": snapshot.ExpiresAt.Format(time.RFC3339),
 		"pubkey":     pubHex,
 	}}
+}
+
+// opUnregister drops the caller from the agent registry, releases their
+// in-flight channel waiters, evicts them from every room, and removes
+// their registry file. The private key on disk is preserved so a
+// subsequent register reuses the same identity and pubkey. Request is
+// signed and authenticated through the dispatch pre-switch.
+func (s *State) opUnregister(req Request) Response {
+	from, _ := req.Args["from"].(string)
+	if from == "" {
+		return Response{Error: "from required"}
+	}
+	s.mu.Lock()
+	if _, ok := s.agents[from]; !ok {
+		s.mu.Unlock()
+		return Response{Error: "not registered: " + from, Code: CodeNotFound}
+	}
+	delete(s.agents, from)
+	delete(s.anyWaiter, from)
+	channels := make([]*Channel, 0, len(s.channels))
+	for _, c := range s.channels {
+		if c.PeerA == from || c.PeerB == from {
+			channels = append(channels, c)
+		}
+	}
+	rooms := make([]*Room, 0, len(s.rooms))
+	for _, r := range s.rooms {
+		rooms = append(rooms, r)
+	}
+	s.mu.Unlock()
+
+	for _, c := range channels {
+		c.releaseWaiter(from, "unregistered")
+	}
+	evict := map[string]struct{}{from: {}}
+	for _, r := range rooms {
+		if r.removeMembers(evict) {
+			s.persistRoomMembers(r)
+		}
+	}
+	s.removeAgentFile(from)
+
+	return Response{OK: true, Data: map[string]any{"name": from}}
 }
 
 func (s *State) opRenew(req Request) Response {

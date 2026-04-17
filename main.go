@@ -22,6 +22,8 @@ func main() {
 		runDaemon()
 	case "register":
 		cmdRegister(os.Args[2:])
+	case "unregister":
+		cmdUnregister(os.Args[2:])
 	case "agents":
 		cmdAgents(os.Args[2:])
 	case "rooms":
@@ -82,6 +84,7 @@ Rooms (N-party):
 
 Usage:
   lesche register [--name <name>]
+  lesche unregister                      drop yourself from the registry
   lesche agents
   lesche channels                        list your peer-pair channels
 
