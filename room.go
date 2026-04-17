@@ -70,7 +70,7 @@ func validRoomName(name string) bool {
 func (s *State) opRooms(req Request) Response {
 	from, _ := req.Args["from"].(string)
 	if from == "" {
-		return Response{Error: "from required"}
+		return errorResponse(CodeError, "missing_from", "set LESCHE_NAME or pass --as", "from required", nil)
 	}
 
 	s.mu.Lock()
@@ -103,16 +103,16 @@ func (s *State) opRoomCreate(req Request) Response {
 	desc, _ := req.Args["desc"].(string)
 
 	if from == "" {
-		return Response{Error: "from required"}
+		return errorResponse(CodeError, "missing_from", "set LESCHE_NAME or pass --as", "from required", nil)
 	}
 	if !validRoomName(name) {
-		return Response{Error: "invalid room name (use [A-Za-z0-9._-], max 64 chars)"}
+		return errorResponse(CodeError, "invalid_room_name", "use [A-Za-z0-9._-], max 64 chars", "invalid room name (use [A-Za-z0-9._-], max 64 chars)", map[string]any{"room": name})
 	}
 
 	s.mu.Lock()
 	if _, exists := s.rooms[name]; exists {
 		s.mu.Unlock()
-		return Response{Error: "room already exists: " + name}
+		return errorResponse(CodeError, "room_already_exists", "pick a different room name", "room already exists: "+name, map[string]any{"room": name})
 	}
 	r := newRoom(name, desc, from)
 	s.rooms[name] = r
@@ -132,14 +132,14 @@ func (s *State) opJoin(req Request) Response {
 	from, _ := req.Args["from"].(string)
 	room, _ := req.Args["room"].(string)
 	if from == "" || room == "" {
-		return Response{Error: "from and room required"}
+		return errorResponse(CodeError, "missing_params", "provide both from and room", "from and room required", map[string]any{"from": from, "room": room})
 	}
 
 	s.mu.Lock()
 	r, ok := s.rooms[room]
 	s.mu.Unlock()
 	if !ok {
-		return Response{Error: "room not found: " + room, Code: CodeNotFound}
+		return errorResponse(CodeNotFound, "room_not_found", "use `lesche rooms` to list available rooms", "room not found: "+room, map[string]any{"room": room})
 	}
 
 	r.mu.Lock()
@@ -149,7 +149,7 @@ func (s *State) opJoin(req Request) Response {
 	}
 	if len(r.members) >= roomMaxMembers {
 		r.mu.Unlock()
-		return Response{Error: "room not found: " + room, Code: CodeNotFound}
+		return errorResponse(CodeNotFound, "room_not_found", "room may be full or inaccessible", "room not found: "+room, map[string]any{"room": room})
 	}
 	r.members[from] = true
 	r.mu.Unlock()
@@ -162,20 +162,20 @@ func (s *State) opLeave(req Request) Response {
 	from, _ := req.Args["from"].(string)
 	room, _ := req.Args["room"].(string)
 	if from == "" || room == "" {
-		return Response{Error: "from and room required"}
+		return errorResponse(CodeError, "missing_params", "provide both from and room", "from and room required", map[string]any{"from": from, "room": room})
 	}
 
 	s.mu.Lock()
 	r, ok := s.rooms[room]
 	s.mu.Unlock()
 	if !ok {
-		return Response{Error: "room not found: " + room, Code: CodeNotFound}
+		return errorResponse(CodeNotFound, "room_not_found", "use `lesche rooms` to list available rooms", "room not found: "+room, map[string]any{"room": room})
 	}
 
 	r.mu.Lock()
 	if !r.members[from] {
 		r.mu.Unlock()
-		return Response{Error: "room not found: " + room, Code: CodeNotFound}
+		return errorResponse(CodeNotFound, "room_not_found", "join the room before leaving", "room not found: "+room, map[string]any{"from": from, "room": room})
 	}
 	delete(r.members, from)
 	delete(r.mailbox, from)
@@ -191,20 +191,20 @@ func (s *State) opParticipants(req Request) Response {
 	from, _ := req.Args["from"].(string)
 	room, _ := req.Args["room"].(string)
 	if from == "" || room == "" {
-		return Response{Error: "from and room required"}
+		return errorResponse(CodeError, "missing_params", "provide both from and room", "from and room required", map[string]any{"from": from, "room": room})
 	}
 
 	s.mu.Lock()
 	r, ok := s.rooms[room]
 	s.mu.Unlock()
 	if !ok {
-		return Response{Error: "room not found: " + room, Code: CodeNotFound}
+		return errorResponse(CodeNotFound, "room_not_found", "use `lesche rooms` to list available rooms", "room not found: "+room, map[string]any{"room": room})
 	}
 
 	r.mu.Lock()
 	if !r.members[from] {
 		r.mu.Unlock()
-		return Response{Error: "room not found: " + room, Code: CodeNotFound}
+		return errorResponse(CodeNotFound, "room_not_found", "join the room before listing participants", "room not found: "+room, map[string]any{"from": from, "room": room})
 	}
 	names := make([]string, 0, len(r.members))
 	for name := range r.members {
@@ -229,20 +229,20 @@ func (s *State) opPost(req Request) Response {
 	room, _ := req.Args["room"].(string)
 	body, _ := req.Args["body"].(string)
 	if from == "" || room == "" {
-		return Response{Error: "from and room required"}
+		return errorResponse(CodeError, "missing_params", "provide both from and room", "from and room required", map[string]any{"from": from, "room": room})
 	}
 
 	s.mu.Lock()
 	r, ok := s.rooms[room]
 	s.mu.Unlock()
 	if !ok {
-		return Response{Error: "room not found: " + room, Code: CodeNotFound}
+		return errorResponse(CodeNotFound, "room_not_found", "use `lesche rooms` to list available rooms", "room not found: "+room, map[string]any{"room": room})
 	}
 
 	r.mu.Lock()
 	if !r.members[from] {
 		r.mu.Unlock()
-		return Response{Error: "room not found: " + room, Code: CodeNotFound}
+		return errorResponse(CodeNotFound, "room_not_found", "join the room before posting", "room not found: "+room, map[string]any{"from": from, "room": room})
 	}
 	r.seq++
 	msg := RoomMessage{
@@ -314,12 +314,12 @@ func (s *State) roomRead(from, room string, timeout time.Duration) Response {
 	r, ok := s.rooms[room]
 	s.mu.Unlock()
 	if !ok {
-		return Response{Error: "room not found: " + room, Code: CodeNotFound}
+		return errorResponse(CodeNotFound, "room_not_found", "use `lesche rooms` to list available rooms", "room not found: "+room, map[string]any{"room": room})
 	}
 	r.mu.Lock()
 	if !r.members[from] {
 		r.mu.Unlock()
-		return Response{Error: "room not found: " + room, Code: CodeNotFound}
+		return errorResponse(CodeNotFound, "room_not_found", "join the room before reading", "room not found: "+room, map[string]any{"from": from, "room": room})
 	}
 	if q, ok := r.mailbox[from]; ok && len(q) > 0 {
 		dropped := r.dropped[from]
@@ -334,7 +334,7 @@ func (s *State) roomRead(from, room string, timeout time.Duration) Response {
 	}
 	if _, exists := r.waiter[from]; exists {
 		r.mu.Unlock()
-		return Response{Error: "another read already pending for " + from + " on room " + room, Code: CodeError}
+		return errorResponse(CodeError, "room_read_already_pending", "wait for the existing read call to finish", "another read already pending for "+from+" on room "+room, map[string]any{"from": from, "room": room})
 	}
 	ch := make(chan RoomMessage, 1)
 	r.waiter[from] = ch
@@ -393,12 +393,12 @@ func (s *State) roomPeek(from, room string) Response {
 	r, ok := s.rooms[room]
 	s.mu.Unlock()
 	if !ok {
-		return Response{Error: "room not found: " + room, Code: CodeNotFound}
+		return errorResponse(CodeNotFound, "room_not_found", "use `lesche rooms` to list available rooms", "room not found: "+room, map[string]any{"room": room})
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if !r.members[from] {
-		return Response{Error: "room not found: " + room, Code: CodeNotFound}
+		return errorResponse(CodeNotFound, "room_not_found", "join the room before peeking", "room not found: "+room, map[string]any{"from": from, "room": room})
 	}
 	queue := r.mailbox[from]
 	out := make([]any, 0, len(queue))
@@ -422,12 +422,12 @@ func (s *State) roomHistory(from, room string, since, limit int) Response {
 	r, ok := s.rooms[room]
 	s.mu.Unlock()
 	if !ok {
-		return Response{Error: "room not found: " + room, Code: CodeNotFound}
+		return errorResponse(CodeNotFound, "room_not_found", "use `lesche rooms` to list available rooms", "room not found: "+room, map[string]any{"room": room})
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if !r.members[from] {
-		return Response{Error: "room not found: " + room, Code: CodeNotFound}
+		return errorResponse(CodeNotFound, "room_not_found", "join the room before reading history", "room not found: "+room, map[string]any{"from": from, "room": room})
 	}
 	out := make([]any, 0, len(r.log))
 	for _, m := range r.log {

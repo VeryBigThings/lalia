@@ -75,7 +75,9 @@ func (c *Channel) tell(s *State, from, body string) Response {
 	peer, ok := c.peerOf(from)
 	if !ok {
 		c.mu.Unlock()
-		return Response{Error: "not a participant of this channel", Code: CodeError}
+		return errorResponse(CodeError, "channel_not_participant", "use a registered peer channel", "not a participant of this channel", map[string]any{
+			"from": from,
+		})
 	}
 	c.seq++
 	msg := Message{
@@ -113,7 +115,9 @@ func (c *Channel) read(from string, timeout time.Duration) Response {
 	_, ok := c.peerOf(from)
 	if !ok {
 		c.mu.Unlock()
-		return Response{Error: "not a participant of this channel", Code: CodeError}
+		return errorResponse(CodeError, "channel_not_participant", "use a registered peer channel", "not a participant of this channel", map[string]any{
+			"from": from,
+		})
 	}
 	if q, ok := c.mailbox[from]; ok && len(q) > 0 {
 		msg := q[0]
@@ -132,7 +136,15 @@ func (c *Channel) read(from string, timeout time.Duration) Response {
 	select {
 	case r := <-ch:
 		if r.err != "" {
-			return Response{Error: r.err, Code: r.code}
+			reason := "read_failed"
+			retry := ""
+			if r.code == CodePeerClosed {
+				reason = "peer_closed"
+				retry = "re-register and retry read"
+			}
+			return errorResponse(r.code, reason, retry, r.err, map[string]any{
+				"from": from,
+			})
 		}
 		return msgResponse(r.msg)
 	case <-time.After(timeout):
@@ -149,7 +161,9 @@ func (c *Channel) peek(from string) Response {
 	defer c.mu.Unlock()
 	_, ok := c.peerOf(from)
 	if !ok {
-		return Response{Error: "not a participant of this channel", Code: CodeError}
+		return errorResponse(CodeError, "channel_not_participant", "use a registered peer channel", "not a participant of this channel", map[string]any{
+			"from": from,
+		})
 	}
 	q := c.mailbox[from]
 	out := make([]any, 0, len(q))
