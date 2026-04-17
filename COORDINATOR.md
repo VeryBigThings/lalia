@@ -58,8 +58,8 @@ files on top of this.
 
 After reading: identify **which files your workstream is going to
 touch**, cross-check them against the heat map, and if you see
-collisions announce them in a lesche tunnel to `claude-coordinator`
-before writing.
+collisions announce them via `tell claude-coordinator "..."` before
+writing.
 
 ## If you are a worker agent — bootstrap
 
@@ -85,8 +85,8 @@ export LESCHE_NAME=<your-name>
 Do not invent a new name. Do not use `claude`, `claude-coordinator`,
 `sonnet`, or any variant — those either collide with the coordinator
 or are reserved. If your harness has already been handed a different
-name by the human, use that instead and tell the coordinator on your
-first tunnel message.
+name by the human, use that instead and tell the coordinator in your
+first message.
 
 ### 2. Register
 
@@ -105,8 +105,7 @@ every minute or so until it shows up.
 
 ### 3. Announce yourself
 
-Open a tunnel to the coordinator and state, in one message, exactly
-these things:
+Tell the coordinator, in one message, exactly these things:
 
 - Your harness (`copilot` / `codex` / `claude-code`).
 - The workstream you were assigned (or "unassigned, awaiting
@@ -117,57 +116,60 @@ these things:
   for `feat/identity`).
 
 ```
-./lesche tunnel claude-coordinator
-# prints sid=<session-id>
-./lesche send <sid> "harness: codex. assigned feat/keychain. COORDINATOR.md read. no blockers."
+./lesche tell claude-coordinator "harness: codex. assigned feat/keychain. COORDINATOR.md read. no blockers."
 ```
+
+No tunnel to open, no sid to track. Your channel with the coordinator
+is implicit on the first `tell`.
 
 ### 4. Receive messages from the coordinator
 
-The coordinator may open a tunnel to you before you open one to
-them. To receive anything arriving on any tunnel you are party to:
+The coordinator may send you a message before you send one to them.
+To receive anything arriving on any channel or room you're in:
 
 ```
-./lesche await-any --timeout 300
-# prints sid=<session-id> then the message body
+./lesche read-any --timeout 300
+# prints kind=peer target=claude-coordinator (or kind=room target=…)
+# then the message body
 ```
 
-`await-any` blocks until something arrives. On a new tunnel opened
-by the coordinator, this is how you learn the sid. After you read
-the first message, reply on that sid:
+`read-any` blocks up to `--timeout` seconds for the next inbound.
+Reply to a peer with:
 
 ```
-./lesche send <sid> "<your reply>"
+./lesche tell claude-coordinator "<your reply>"
 ```
 
-If you already know the sid (because you opened the tunnel, or
-because `./lesche sessions` shows it), block on just that tunnel:
+Or if you want to pull from just one specific peer:
 
 ```
-./lesche await <sid> --timeout 300
+./lesche read claude-coordinator --timeout 300
 ```
+
+Need a synchronous question-and-answer in one call? Use `ask`:
+
+```
+./lesche ask claude-coordinator "can I rebase on main now?" --timeout 60
+```
+
+`ask` sends, then blocks for the peer's next message and prints it
+on stdout.
 
 ### 5. Keep your lease alive
 
-Leases are 10 minutes; any command renews. If your harness sits
-idle writing code without calling lesche for longer than that, your
-tunnels close with `peer lease expired` on the coordinator's side
-and the coordinator has to chase you. Two habits that prevent this:
+Leases are 30 minutes; any command renews. If your harness sits idle
+for longer than that, you get dropped and any blocking read returns
+immediately. Two habits that prevent this:
 
 - Call `./lesche renew` right before a long run of edits.
-- Or just run `./lesche sessions` occasionally — it renews too.
-
-There is a known issue (see "Spot patch" below) that the default
-lease is too short; one of the current-batch workstreams will raise
-it to 30+ minutes. Until then, renew explicitly.
+- Or just run any lesche command occasionally — they all renew.
 
 ### 6. Announce key moments
 
-Open a tunnel and send a message to `claude-coordinator` at these
-checkpoints:
+`tell claude-coordinator` at these checkpoints:
 
 - **Start of work** — confirmed in step 3.
-- **Open question in your scope entry** — don't guess; ask.
+- **Open question in your scope entry** — don't guess; use `ask`.
 - **Need to touch a file outside your heat-map column** — collision
   check before writing.
 - **Ready for review** — branch name, commit SHA, `make test`
@@ -182,12 +184,13 @@ Worker session template; safe to run verbatim after step 1:
 export LESCHE_NAME=<your-name>
 ./lesche register
 ./lesche agents | grep claude-coordinator || echo "coordinator not up"
-./lesche sessions                       # anything already waiting?
-./lesche await-any --timeout 60         # or open your own tunnel
+./lesche channels                       # who do I already have a channel with?
+./lesche peek claude-coordinator        # anything pending?
+./lesche read-any --timeout 60          # or block for the first inbound
 ```
 
-If `await-any` times out and `sessions` shows no tunnels, open one
-yourself per step 3.
+If `read-any` times out and `peek` shows nothing, push first with
+`tell claude-coordinator "..."` per step 3.
 
 ## How to coordinate (general)
 
@@ -231,27 +234,29 @@ run `./lesche protocol`. Full help: `./lesche help`.
 
 ## Current assignments
 
-Post-channels batch. Workstream D killed by the channels redesign, so
-re-slot `claude-code` onto something else.
+Post-channels batch. Assignments were reshuffled once D was killed:
+cold agents get smaller-surface workstreams; agents with prior
+shipped work get the heavier ones.
 
 | Agent | Branch | Workstream | Worktree path | Status |
 |-------|--------|------------|---------------|--------|
-| `copilot` | `feat/identity` | A. Identity refactor + nicknames | `~/Obolos/lesche-identity` | Assigned. Worktree exists at head `a907186`; rebase on main before starting. |
-| `claude-code` | `feat/errors` | F. Structured error payloads | `~/Obolos/lesche-errors` | Assigned. Solo workstream — touches `protocol.go` heavy and every handler. Must not run concurrently with any other. |
-| `codex` | `feat/keychain` | E. Keychain integration | `~/Obolos/lesche-keychain` | Assigned. Create worktree + branch from current main. Self-contained; no protocol change. |
+| `copilot` | `feat/identity` | A. Identity refactor + nicknames | `~/Obolos/lesche-identity` | Assigned. Prior shipped: feat/write-queue. Biggest-context task; copilot is the best-warmed agent on internals. Worktree exists at head `a907186`; rebase on main before starting. |
+| `codex` | `feat/errors` | F. Structured error payloads | `~/Obolos/lesche-errors` | Assigned. Prior shipped: feat/rooms. Touches every handler but mechanically simple once the helper is in place; codex is warm on the handler pattern from rooms. Create worktree + branch from current main. |
+| `claude-code` | `feat/keychain` | E. Keychain integration | `~/Obolos/lesche-keychain` | Assigned. Cold-start agent; E is the smallest and most self-contained workstream available. Create worktree + branch from current main. No `protocol.go` change, no `state.go` change — touches only `signing.go`, new `keystore.go`, `help.go`. |
 
-Sequencing note: F (structured errors) was originally gated behind
-A + E. Given `claude-code` needs an A-tier task and there is no other
-available, we break the sequencing and run F in parallel with E. A
-(identity) has no overlap with F. E (keychain) has no overlap with F.
-A and F both touch `state.go` dispatch lightly; last-to-merge rebases.
+Sequencing: A, E, F can all run in parallel.
+- A ↔ F overlap on `state.go` dispatch (lightly). Last-to-merge rebases.
+- E has no overlap with anything — merges whenever it's ready.
+- F was originally sequenced last to avoid protocol churn against A/E;
+  we run it in parallel now because A is heavier on `registry.go` and
+  E doesn't touch `state.go` at all, so the overlap is small.
 
-All three agents start cold this batch. Read the "Cold-start reading
-list" section above plus your workstream's extras from "Per-workstream
-reading list" below before writing any code.
+All three agents start cold this batch (no prior-session context).
+Read the "Cold-start reading list" section above plus your workstream's
+extras from "Per-workstream reading list" below before writing code.
 
-Merge gate unchanged: `make test` passing + human approval over a
-lesche tunnel to `claude-coordinator`.
+Merge gate unchanged: `make test` passing + human approval via
+`tell claude-coordinator "ready for review: ..."`.
 
 ### Settled in prior batches
 
@@ -282,16 +287,17 @@ Read this after the cold-start list above, before writing code.
 6. Open question before you start: **nickname storage location**.
    `IDENTITY.md` proposes `~/.lesche/nicknames.json` outside the
    workspace; alternative is in the git-backed workspace for audit.
-   Raise this in your kickoff tunnel to `claude-coordinator`.
+   Raise this in your kickoff message to `claude-coordinator`
+   (e.g. `ask claude-coordinator "nickname storage: home or workspace?"`).
 
-**F. Structured error payloads (`claude-code`, `feat/errors`)**
+**F. Structured error payloads (`codex`, `feat/errors`)**
 
-Killed workstream D is replaced with F. You are adding a structured
-`error` object alongside the existing `Error` / `Code` fields in
-`Response`. Every error-returning handler becomes eligible to emit
-structured fields (`reason`, `retry_hint`, `context`). Clients keep
-consuming the string `Error` for pretty-print; machine-readable
-fields land in `Data.error`.
+You are adding a structured `error` object alongside the existing
+`Error` / `Code` fields in `Response`. Every error-returning handler
+becomes eligible to emit structured fields (`reason`, `retry_hint`,
+`context`). Clients keep consuming the string `Error` for
+pretty-print; machine-readable fields land in `Data.error` (or
+alongside it — your call, document it in `help.go`).
 
 1. `protocol.go` — `Response` struct. This is the only struct in
    the codebase you're allowed to extend (additively). Do not rename
@@ -301,38 +307,46 @@ fields land in `Data.error`.
    also populates a structured `error` object.
 3. `room.go`, `channel.go` — same pattern, fewer sites.
 4. `client.go` — `handle()` currently prints `resp.Error` to stderr
-   and exits with `resp.Code`. Add pretty-print of `resp.Data.error`
-   when present (retry-hint, context fields).
+   and exits with `resp.Code`. Add pretty-print of the structured
+   `error` when present (retry-hint, context fields).
 5. `state_test.go`, `daemon_integration_test.go`, `signing_test.go`,
    `room_test.go` — existing tests assert on `resp.Error` and
    `resp.Code`. Add new assertions that structured fields populate
    correctly for representative errors.
 
-Must-run-solo: F touches every error path. If you try to run
-concurrently with A or E you will have merge conflicts in
-`state.go` and possibly `room.go`. Coordinate with their timelines.
+Co-ordination: A (identity) and F both touch `state.go` dispatch.
+Last-to-merge rebases; A's touches are in registry-adjacent code
+paths, F's are in error-return paths — expected conflict is small.
 
-**E. Keychain integration (`codex`, `feat/keychain`)**
+**E. Keychain integration (`claude-code`, `feat/keychain`)**
+
+You are cold on this codebase. E is deliberately the smallest
+available workstream. Read the cold-start list above first, then:
 
 1. `signing.go` — current implementation: keys live as files at
    `~/.lesche/keys/<name>.key`. You will extract a keystore
-   interface with two backends: file (default) and keychain
-   (macOS Security framework via cgo, or `99designs/keyring` or
-   similar — pick a pure-Go library if you can find one that
-   covers macOS Keychain).
+   interface with two backends: file (current default) and keychain
+   (macOS Security framework). Pick a pure-Go library if one exists
+   that covers macOS Keychain; otherwise cgo is acceptable (flag
+   this in your kickoff message).
 2. `help.go` — document `LESCHE_KEYSTORE=keychain` env switch.
 3. `signing_test.go` — existing coverage pattern for the file
-   backend. Mirror it for keychain, skipping on CI/Linux if the
-   backend is unavailable. Verify fallback-to-file when keychain
-   init fails.
+   backend. Mirror it for keychain, skipping on Linux / CI when
+   the backend is unavailable. Verify fallback-to-file when
+   keychain init fails.
+
+No `protocol.go`, no `state.go`, no `channel.go`, no `room.go`
+changes. Your footprint is `signing.go` + one new file + a help
+paragraph. If you find yourself editing anything else, stop and
+`ask claude-coordinator`.
 
 Everyone: before writing, run `./lesche protocol` to see the
 agent-facing guide verbatim, and `make test` to confirm the baseline
-suite (22 tests, ~5.5s) is green on your branch.
+suite (32 tests, ~2.2s) is green on your branch.
 
-Rules repeated for clarity: each agent owns its branch end-to-end (code +
-tests + docs + help updates). Merge gate is `make test` passing plus human
-approval over a lesche tunnel to `claude`.
+Each agent owns its branch end-to-end (code + tests + docs + help
+updates). Merge gate is `make test` passing plus human approval via
+`tell claude-coordinator "ready for review: ..."`.
 
 ### Settled design notes from the first batch
 
@@ -346,18 +360,7 @@ approval over a lesche tunnel to `claude`.
 3. **Nickname storage location** still open; pick before feat/identity
    starts. `IDENTITY.md` proposes `~/.lesche/nicknames.json` (outside
    workspace). Alternative: in the workspace for git audit. Copilot
-   should surface this in the kickoff tunnel.
-
-### UX issue flagged, not in a workstream yet
-
-4. **Default lease TTL is too short.** 10 minutes. Agents doing
-   independent implementation work between lesche calls get dropped
-   silently; open tunnels close with `peer lease expired` on the peer
-   side. Observed during the doc-writing push before this restart.
-   Easiest fix: raise TTL to 30 or 60 minutes. Slightly better fix:
-   also renew lease on `agents` and other from-less listings. Scope:
-   tiny; can land as a spot patch to main outside the parallel batch,
-   or bundled into whichever workstream merges first.
+   should `ask claude-coordinator` on kickoff.
 
 ## Parallelization principles
 
@@ -371,11 +374,11 @@ approval over a lesche tunnel to `claude`.
    Agents do not `make install` from a feature branch except on their
    own isolated `LESCHE_HOME`.
 4. **Coordination happens through lesche.** Agents announce start of
-   work and report completion by opening a tunnel to Claude. Real-time
-   questions during work use the same channel.
+   work and report completion by `tell claude-coordinator "..."`.
+   Real-time questions use the same channel via `ask` or `tell`.
 5. **Merge gate is a human decision** (for now — the user). Agent
-   reports "ready for review" in a tunnel; human merges when satisfied
-   with the diff and a clean test run.
+   reports "ready for review" over lesche; human merges when
+   satisfied with the diff and a clean test run.
 
 ## File-ownership heat map
 
@@ -413,7 +416,6 @@ H = heavy. M = moderate. L = small additive.
 The turn-FSM / tunnel era file `tunnel.go` no longer exists; its
 role is covered by `channel.go`. Any older heat-map entry referring
 to `tunnel.go` is stale and should be read as `channel.go`.
-  Do **not** run in the same batch as any other feature.
 
 ## Workstream catalog
 
@@ -441,8 +443,8 @@ migration of legacy name-keyed records; collision handling (two
 `claude`s register, daemon disambiguates).
 
 **Blockers**: None to start. Sequencing: run alone or with purely
-additive workstreams (queue/keychain). Do not run concurrently with
-rooms if you want rooms to benefit from rich addressing at merge time.
+additive workstreams (keychain). Small collision with F (struct
+errors) on `state.go`; last-to-merge rebases.
 
 **Agent fit**: Highest context requirement. Whoever owns this should
 already have full lesche internals loaded.
@@ -517,29 +519,27 @@ when starting that batch, write a short design doc first.
 4. **`protocol.go` struct shapes are owned by workstream F** this
    batch. If you are not F, add fields additively only. F is allowed
    to rework `Response`.
-5. **If you need to touch a file outside your heat-map column**, stop
-   and announce in a tunnel to `claude`. Collision is possible; get
-   alignment before writing.
-6. **When done, open a tunnel to `claude` and report**: branch name,
-   commits pushed, `make test` output summary, any bugs found-but-not-
-   fixed, any new env vars or commands added. Claude will either
-   approve-for-merge or flag issues for another round.
+5. **If you need to touch a file outside your heat-map column**,
+   stop and `tell claude-coordinator "..."` to check for collisions
+   before writing.
+6. **When done, `tell claude-coordinator` and report**: branch name,
+   commit SHA, `make test` output summary, any bugs found-but-not-
+   fixed, any new env vars or commands added. Coordinator will
+   either approve-for-merge or flag issues for another round.
 7. **Rebase before merge.** If main moved while you worked, rebase
    your branch and re-run `make test` before asking for merge.
 
 ## What is explicitly off-limits in this batch
 
-- **Changing `protocol.go` request/response struct shapes** beyond
-  purely additive fields. That refactor belongs to structured-errors.
-- **Deleting or renaming existing commands.** Additive only.
+- **`protocol.go` struct shapes** — only F owns this. If you are A
+  or E, add fields additively only; do not rename or rework
+  existing ones.
+- **Deleting or renaming existing commands.** Additive only. The
+  channels redesign is the last non-additive surface change for a
+  while.
 - **Altering the wire format of persisted files** (registry JSON,
-  tunnel messages, SESSION.md). Readers on main must still be able to
-  parse older files after your workstream merges.
+  per-peer `peers/<a>--<b>/*.md`, per-room `rooms/<name>/*.md`).
+  Readers on main must still parse older files after your
+  workstream merges.
 - **Touching `/opt/homebrew/bin/lesche`** from a feature branch. The
   production binary is rebuilt from main only.
-
-## Pointer
-
-Open questions blocking work are listed at the top of this file under
-"Current assignments". Once answered, they land here as settled design
-notes.
