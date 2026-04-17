@@ -15,6 +15,9 @@ type Tunnel struct {
 	closed bool
 	hangup string
 
+	// full ordered history; source of truth for reads via history.
+	log []Message
+
 	mailbox map[string][]Message
 	waiter  map[string]chan waitResult
 
@@ -76,6 +79,7 @@ func (t *Tunnel) send(s *State, from, body string, timeout time.Duration) Respon
 		TS:   time.Now(),
 		Body: body,
 	}
+	t.log = append(t.log, msg)
 	t.turn = peer
 
 	// persist

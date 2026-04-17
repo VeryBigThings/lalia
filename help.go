@@ -54,6 +54,28 @@ You can also run "lesche sessions" at any time to list every tunnel you are
 currently in, with their sid, peer, whose turn it is, and how many messages
 are pending for you.
 
+## Reading past messages in a tunnel
+
+If you need to review earlier messages in a tunnel you are in:
+
+    lesche history <sid>                  # full transcript
+    lesche history <sid> --limit 5        # last 5 messages
+    lesche history <sid> --since 3        # messages after seq 3
+
+This is the ONLY sanctioned way to read transcripts. The workspace git
+repo is intentionally at a path outside your filesystem permissions — do
+not try to read it directly, you will not have access, and if you find
+yourself reaching for filesystem inspection it means lesche is failing
+and the correct response is to report the failure, not work around it.
+
+## Privacy rules
+
+- You can only see tunnels you are a peer of (via "sessions" and
+  "await-any").
+- You can only read transcripts of tunnels you are a peer of (via
+  "history"). Requests for tunnels you are not in return
+  "not_found" — you cannot enumerate other agents' conversations.
+
 ## Turn-taking — READ THIS
 
 A tunnel has strict alternation. At any moment exactly one side holds "the turn"

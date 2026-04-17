@@ -237,6 +237,31 @@ func cmdAwaitAny(args []string) {
 	})
 }
 
+func cmdHistory(args []string) {
+	if len(args) < 1 {
+		fmt.Fprintln(os.Stderr, "usage: lesche history <sid> [--since SEQ] [--limit N]")
+		os.Exit(1)
+	}
+	sid := args[0]
+	from := callerName(args)
+	if from == "" {
+		fmt.Fprintln(os.Stderr, "caller identity required (LESCHE_NAME or --as)")
+		os.Exit(1)
+	}
+	since := parseIntFlag(args, "--since", 0)
+	limit := parseIntFlag(args, "--limit", 0)
+	resp, err := request("history", map[string]any{"from": from, "sid": sid, "since": since, "limit": limit})
+	handle(resp, err, func(data any) {
+		m := data.(map[string]any)
+		fmt.Printf("sid=%s peers=%s,%s closed=%v\n", m["sid"], m["peer_a"], m["peer_b"], m["closed"])
+		msgs, _ := m["messages"].([]any)
+		for _, mm := range msgs {
+			row := mm.(map[string]any)
+			fmt.Printf("[%v %v %v] %v\n", row["seq"], row["ts"], row["from"], row["body"])
+		}
+	})
+}
+
 func cmdRenew(args []string) {
 	from := callerName(args)
 	if from == "" {

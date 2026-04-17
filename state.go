@@ -157,6 +157,8 @@ func (s *State) dispatch(req Request) Response {
 		return s.opAgents()
 	case "sessions":
 		return s.opSessions(req)
+	case "history":
+		return s.opHistory(req)
 	case "tunnel":
 		return s.opTunnel(req)
 	case "send":
@@ -316,6 +318,52 @@ func (s *State) opAwaitAny(req Request) Response {
 		s.mu.Unlock()
 		return Response{Error: "timeout waiting for any tunnel", Code: CodeTimeout}
 	}
+}
+
+func (s *State) opHistory(req Request) Response {
+	from, _ := req.Args["from"].(string)
+	sid, _ := req.Args["sid"].(string)
+	sinceF, _ := req.Args["since"].(float64)
+	limitF, _ := req.Args["limit"].(float64)
+	since := int(sinceF)
+	limit := int(limitF)
+	if from == "" {
+		return Response{Error: "from required"}
+	}
+	s.mu.Lock()
+	t, ok := s.tunnels[sid]
+	s.mu.Unlock()
+	if !ok {
+		// same error as "you are not a peer" so agents cannot enumerate sids they are not in.
+		return Response{Error: "tunnel not found: " + sid, Code: CodeNotFound}
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.PeerA != from && t.PeerB != from {
+		return Response{Error: "tunnel not found: " + sid, Code: CodeNotFound}
+	}
+	out := make([]any, 0, len(t.log))
+	for _, m := range t.log {
+		if since > 0 && m.Seq <= since {
+			continue
+		}
+		out = append(out, map[string]any{
+			"seq":  m.Seq,
+			"from": m.From,
+			"ts":   m.TS.Format(time.RFC3339),
+			"body": m.Body,
+		})
+	}
+	if limit > 0 && len(out) > limit {
+		out = out[len(out)-limit:]
+	}
+	return Response{OK: true, Data: map[string]any{
+		"sid":      sid,
+		"peer_a":   t.PeerA,
+		"peer_b":   t.PeerB,
+		"closed":   t.closed,
+		"messages": out,
+	}}
 }
 
 // deliverAny signals the any-waiter for `to` with (sid, msg) if one exists.

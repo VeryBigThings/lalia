@@ -27,6 +27,8 @@ func main() {
 		cmdClose(os.Args[2:])
 	case "sessions":
 		cmdSessions(os.Args[2:])
+	case "history":
+		cmdHistory(os.Args[2:])
 	case "await-any":
 		cmdAwaitAny(os.Args[2:])
 	case "renew":
@@ -51,6 +53,7 @@ Usage:
   lesche register [--name <name>]
   lesche agents
   lesche sessions            list open tunnels for caller
+  lesche history <sid> [--limit N] [--since SEQ]   read transcript of a tunnel you are in
   lesche tunnel <peer>
   lesche send <sid> "<message>" [--timeout N]
   lesche await <sid> [--timeout N]
