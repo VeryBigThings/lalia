@@ -8,6 +8,7 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"syscall"
 	"time"
@@ -468,6 +469,68 @@ func cmdRenew(args []string) {
 func cmdStop(_ []string) {
 	resp, err := request("stop", nil)
 	handle(resp, err, nil)
+}
+
+func cmdInit(args []string) {
+	if len(args) != 1 {
+		fmt.Fprintln(os.Stderr, "usage: lesche init <worker|supervisor>")
+		os.Exit(1)
+	}
+	prompt, err := promptForRole(args[0])
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	fmt.Print(prompt)
+}
+
+func cmdPrompt(args []string) {
+	if len(args) < 1 {
+		fmt.Fprintln(os.Stderr, "usage: lesche prompt <worker|supervisor> [--force]")
+		os.Exit(1)
+	}
+	role := args[0]
+	force := parseBoolFlag(args[1:], "--force")
+
+	prompt, err := promptForRole(role)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	path := filepath.Join(cwd, "LESCHE.md")
+	if err := writeManagedPromptFile(path, prompt, force); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	fmt.Println(path)
+}
+
+func cmdRun(args []string) {
+	if len(args) < 2 {
+		fmt.Fprintln(os.Stderr, "usage: lesche run <worker|supervisor> --claude-code|--codex|--copilot [--force] [args...]")
+		os.Exit(1)
+	}
+
+	role := args[0]
+	harness, force, harnessArgs, err := parseRunArgs(args[1:])
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+
+	if err := runHarness(role, harness, force, harnessArgs); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		if ee := new(exec.ExitError); errors.As(err, &ee) {
+			os.Exit(ee.ExitCode())
+		}
+		os.Exit(1)
+	}
 }
 
 func printBody(v any) {
