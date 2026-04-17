@@ -63,11 +63,29 @@ Usage:
   lesche stop
   lesche protocol            print agent-facing protocol guide
 
+Identity:
+  On register, lesche generates an Ed25519 keypair for your name.
+  Public key lives in the registry; private key at ~/.lesche/keys/<name>.key
+  (mode 0600). Every authenticated request is signed by your key and
+  verified by the daemon. Another process passing --as <your-name> without
+  your key will be rejected with exit code 6. Re-register to mint a fresh
+  key if you lose it.
+
 Environment:
   LESCHE_NAME       caller identity for all commands (override per-call with --as)
-  LESCHE_WORKSPACE  git repo where transcripts are committed (default ~/.lesche/workspace)
+  LESCHE_HOME       socket/pid/keys dir (default ~/.lesche)
+  LESCHE_WORKSPACE  git repo for transcripts (default ~/.local/state/lesche/workspace)
 
 Exit codes:
-  0 ok, 1 error, 2 timeout, 3 peer_closed, 4 not_your_turn, 5 not_found
+  0  ok
+  1  generic error
+  2  timeout — tunnel still open; call send/await again to resume
+  3  peer_closed — peer hung up; conversation over
+  4  not_your_turn — wrong side of the FSM; call the other primitive
+  5  not_found — sid or peer name does not exist
+  6  unauthorized — signature invalid or caller not registered
+
+Run "lesche protocol" for the full agent-facing guide (paste into your
+harness config so your LLM knows the rules).
 `)
 }
