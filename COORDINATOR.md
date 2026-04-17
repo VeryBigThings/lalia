@@ -224,8 +224,8 @@ run `./lesche protocol`. Full help: `./lesche help`.
 
 **Designed, not implemented:**
 - Structured error payloads (workstream F), keychain integration
-  (workstream E), multi-project workspace isolation, cross-machine
-  sync.
+  (workstream E), plan primitive + manager/worker roles (workstream
+  H; unassigned), multi-project workspace isolation.
 
 **Killed:**
 - Resumable blocking (workstream D). The turn FSM is gone, so there
@@ -476,6 +476,67 @@ behavior when backend is unavailable.
 **Agent fit**: Self-contained. Works for any agent that can read
 `signing.go`.
 
+### H. Plan primitive + manager/worker roles
+
+**Goal**: Replace this markdown file as the source of truth for
+assignments. Move the assignment table into a git-backed `plan.json`
+per project, mutable via `lesche plan …` commands. Introduce a role
+axis on Agent (manager vs worker) so the daemon knows who can mutate
+what. COORDINATOR.md stays for rationale, rules of engagement, cold-
+start reading — it stops holding live state.
+
+**Scope** (decisions already made, see conversation log):
+- Roles set at `register --role worker|manager`. Stored on Agent.
+  No cross-agent privilege beyond command-surface gating.
+- One manager per project. Unregister rejects (`ManagerBusy`) if the
+  manager still owns a non-empty plan; must `plan handoff <agent>`
+  first.
+- Project id auto-derived: `git remote get-url origin` slugified;
+  fallback to repo basename when no remote.
+- Plan storage: `<workspace>/plans/<project-id>/plan.json`. Same write
+  queue as registry / room writes.
+- Assignment shape: `{slug, goal, worktree, owner, status,
+  updated_at}` with status ∈ `open | assigned | in-progress |
+  ready | blocked | merged`.
+- Manager-only mutations: `plan create <goal>`, `plan assign <slug>
+  <agent> --worktree <path> --goal "..."`, `plan unassign <slug>`,
+  `plan handoff <new-manager>`. `assign` verifies the worktree path
+  exists on the manager's machine before writing.
+- Worker self-service: `plan status <slug> in-progress|ready|blocked`
+  flips the caller's own row only; daemon rejects writes to a row
+  the caller does not own. `plan claim <slug>` verifies worktree
+  exists on caller's machine, sets owner=self, status=in-progress.
+- Anyone can read: `plan show [--project <id>]` defaults to cwd's
+  project; `plan list` returns plans where caller is manager or owner.
+
+**Files**: new `plan.go` (core), new `project.go` (git-remote →
+project-id resolver), `state.go` (new ops + role-gated dispatch
+checks), `registry.go` (Role field on Agent, persist), `client.go`
+(cmdPlan* subcommands), `main.go` (dispatch), `help.go` (document),
+`protocol.go` (new error code `ManagerBusy`, additive), new tests.
+
+**Tests**: role persists across re-register; worker cannot mutate
+other workers' rows; worker can flip own status; manager cannot be
+unregistered while holding a non-empty plan; handoff atomically
+transfers manager rights; project id derivation from remote vs
+repo-basename; plan file round-trips through git.
+
+**Blockers**: Heavy collision with A (identity) on `state.go`
+dispatch + `registry.go` Agent record. Both add fields; last-to-merge
+rebases, but the conceptual overlap is real — identity lands ULID
+agent_id, plan adds Role. Sensible to sequence H **after** A so H
+builds on stable Agent shape. F overlap is minor (new error code is
+additive).
+
+**Agent fit**: Deep context. Touches the edit surface of every
+dispatch path plus the registry. Whoever owns this should already
+have shipped at least one prior workstream with full internals
+loaded. Not a cold-start task.
+
+**Status**: Designed but unassigned. Pick it up after A merges; the
+natural candidate is whichever of the current three agents finishes
+their current batch first with clean test runs.
+
 ### F. Structured error payloads
 
 **Goal**: Replace string-only errors with JSON payloads carrying
@@ -502,9 +563,11 @@ handlers.
 
 ## Sequencing after the current batch
 
-After A, E, F all land, the next-up work is multi-project workspace
-isolation and cross-machine sync. Neither has a written design yet;
-when starting that batch, write a short design doc first.
+After A merges, H (plan primitive + roles) unblocks. Pick it up with
+the first agent to finish A/E/F cleanly. After H lands, the next-up
+work is multi-project workspace isolation (one daemon managing state
+for several repos without collision); no written design yet — write
+a short design doc first when that batch starts.
 
 ## Rules of engagement
 
