@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -80,10 +81,20 @@ func openQueue(dir string) (*Queue, error) {
 		name       TEXT    PRIMARY KEY,
 		desc       TEXT    NOT NULL DEFAULT '',
 		created_by TEXT    NOT NULL,
-		created_at TEXT    NOT NULL
+		created_at TEXT    NOT NULL,
+		archived   INTEGER NOT NULL DEFAULT 0
 	)`); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("create mailbox_rooms table: %w", err)
+	}
+	// Migrate existing DBs that predate the archived column. SQLite has no
+	// ADD COLUMN IF NOT EXISTS; attempting the ALTER is a no-op on fresh
+	// DBs but errors with "duplicate column" — treat that as success.
+	if _, err := db.Exec(`ALTER TABLE mailbox_rooms ADD COLUMN archived INTEGER NOT NULL DEFAULT 0`); err != nil {
+		if !strings.Contains(err.Error(), "duplicate column") {
+			db.Close()
+			return nil, fmt.Errorf("migrate mailbox_rooms.archived: %w", err)
+		}
 	}
 	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS mailbox_room_members (
 		room   TEXT NOT NULL,
@@ -309,6 +320,7 @@ type roomRecord struct {
 	desc      string
 	createdBy string
 	createdAt string
+	archived  bool
 }
 
 // roomUpsert inserts or updates a room definition.
@@ -360,7 +372,7 @@ func (q *Queue) roomDeleteAll(room string) error {
 
 // roomRows returns all persisted room definitions.
 func (q *Queue) roomRows() ([]roomRecord, error) {
-	rows, err := q.db.Query(`SELECT name, desc, created_by, created_at FROM mailbox_rooms`)
+	rows, err := q.db.Query(`SELECT name, desc, created_by, created_at, archived FROM mailbox_rooms`)
 	if err != nil {
 		return nil, err
 	}
@@ -368,12 +380,25 @@ func (q *Queue) roomRows() ([]roomRecord, error) {
 	var out []roomRecord
 	for rows.Next() {
 		var r roomRecord
-		if err := rows.Scan(&r.name, &r.desc, &r.createdBy, &r.createdAt); err != nil {
+		var archived int
+		if err := rows.Scan(&r.name, &r.desc, &r.createdBy, &r.createdAt, &archived); err != nil {
 			return nil, err
 		}
+		r.archived = archived != 0
 		out = append(out, r)
 	}
 	return out, rows.Err()
+}
+
+// roomSetArchived flips the persisted archived flag for a room.
+// No-op (no error) if the row does not exist.
+func (q *Queue) roomSetArchived(name string, archived bool) error {
+	flag := 0
+	if archived {
+		flag = 1
+	}
+	_, err := q.db.Exec(`UPDATE mailbox_rooms SET archived=? WHERE name=?`, flag, name)
+	return err
 }
 
 // roomMemberRows returns all (room, member) pairs.

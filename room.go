@@ -90,6 +90,7 @@ func (s *State) opRooms(req Request) Response {
 			"desc":       r.Desc,
 			"members":    len(r.members),
 			"messages":   r.seq,
+			"archived":   r.Archived,
 			"created_by": r.CreatedBy,
 			"created_at": r.CreatedAt.Format(time.RFC3339),
 		})

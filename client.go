@@ -194,6 +194,10 @@ func cmdAgents(_ []string) {
 }
 
 func cmdRooms(args []string) {
+	if len(args) >= 1 && args[0] == "gc" {
+		cmdRoomsGC(args[1:])
+		return
+	}
 	from := mustCaller(args)
 	resp, err := request("rooms", map[string]any{"from": from})
 	handle(resp, err, func(data any) {
@@ -203,7 +207,28 @@ func cmdRooms(args []string) {
 		}
 		for _, row := range rows {
 			m := row.(map[string]any)
-			fmt.Printf("%s\tmembers=%v\tmessages=%v\n", m["name"], m["members"], m["messages"])
+			archived := ""
+			if v, _ := m["archived"].(bool); v {
+				archived = "\tarchived"
+			}
+			fmt.Printf("%s\tmembers=%v\tmessages=%v%s\n", m["name"], m["members"], m["messages"], archived)
+		}
+	})
+}
+
+func cmdRoomsGC(args []string) {
+	from := mustCaller(args)
+	resp, err := request("rooms_gc", map[string]any{"from": from})
+	handle(resp, err, func(data any) {
+		m, _ := data.(map[string]any)
+		rows, _ := m["archived"].([]any)
+		if len(rows) == 0 {
+			fmt.Println("no merged rooms to archive")
+			return
+		}
+		for _, row := range rows {
+			rm := row.(map[string]any)
+			fmt.Printf("archived slug=%s project=%s\n", rm["slug"], rm["project"])
 		}
 	})
 }

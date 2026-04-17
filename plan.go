@@ -74,18 +74,6 @@ func (s *State) loadPlans() error {
 			p.ProjectID = e.Name()
 		}
 		s.plans[p.ProjectID] = &p
-		// Recreate archived room stubs for merged assignments.
-		for _, asgn := range p.Assignments {
-			if asgn.Status == statusMerged {
-				if _, ok := s.rooms[asgn.Slug]; !ok {
-					r := newRoom(asgn.Slug, "", p.Supervisor)
-					r.Archived = true
-					s.rooms[asgn.Slug] = r
-				} else {
-					s.rooms[asgn.Slug].Archived = true
-				}
-			}
-		}
 	}
 	return nil
 }
@@ -145,18 +133,80 @@ func (s *State) ensureRoomWithMembers(slug, createdBy string, members []string) 
 	return r
 }
 
-// archiveRoom marks a room as archived (no new posts). Must NOT be called
-// with s.mu held. Safe to call if the room does not exist.
-func (s *State) archiveRoom(slug string) {
+// archiveRoom marks a room as archived (no new posts) and persists the flag.
+// Must NOT be called with s.mu held. Safe to call if the room does not exist.
+// Returns true if the room existed and was flipped from open to archived.
+func (s *State) archiveRoom(slug string) bool {
 	s.mu.Lock()
 	r, ok := s.rooms[slug]
 	s.mu.Unlock()
 	if !ok {
-		return
+		return false
 	}
 	r.mu.Lock()
+	already := r.Archived
 	r.Archived = true
 	r.mu.Unlock()
+	if already {
+		return false
+	}
+	if s.queue != nil {
+		_ = s.queue.roomSetArchived(slug, true)
+	}
+	return true
+}
+
+// opRoomsGC archives rooms backed by merged assignments in every plan the
+// caller supervises. Workers are rejected. Returns the list of slugs newly
+// archived in this call (already-archived rooms are skipped).
+//
+// `plan unassign` and `plan status merged` no longer archive rooms
+// automatically — this is the opt-in cleanup step for finished workstreams.
+func (s *State) opRoomsGC(req Request) Response {
+	from := strVal(req.Args, "from")
+	if from == "" {
+		return errorResponse(CodeError, "missing_from", "set KOPOS_NAME or pass --as", "from required", nil)
+	}
+
+	s.mu.Lock()
+	a := s.agentByName(from)
+	if a == nil {
+		s.mu.Unlock()
+		return errorResponse(CodeUnauthorized, "not_registered", "run kopos register", "not registered: "+from, map[string]any{"from": from})
+	}
+	if a.Role != "supervisor" {
+		s.mu.Unlock()
+		return errorResponse(CodeUnauthorized, "not_supervisor", "register with --role supervisor", "caller is not a supervisor: "+from, map[string]any{"from": from})
+	}
+
+	type candidate struct {
+		slug    string
+		project string
+	}
+	var cands []candidate
+	for pid, plan := range s.plans {
+		if plan.Supervisor != from {
+			continue
+		}
+		for _, asgn := range plan.Assignments {
+			if asgn.Status != statusMerged {
+				continue
+			}
+			if _, ok := s.rooms[asgn.Slug]; !ok {
+				continue
+			}
+			cands = append(cands, candidate{slug: asgn.Slug, project: pid})
+		}
+	}
+	s.mu.Unlock()
+
+	archived := make([]any, 0, len(cands))
+	for _, c := range cands {
+		if s.archiveRoom(c.slug) {
+			archived = append(archived, map[string]any{"slug": c.slug, "project": c.project})
+		}
+	}
+	return Response{OK: true, Data: map[string]any{"archived": archived, "count": len(archived)}}
 }
 
 // internalPost appends a message to the room's log and delivers to mailboxes
@@ -389,7 +439,8 @@ func (s *State) opPlanAssign(req Request) Response {
 }
 
 // opPlanUnassign clears the owner of a slug and resets status to open.
-// Archives the assignment room (no new posts). Supervisor only.
+// The slug's room stays live so reassignees can inherit the conversation;
+// supervisors can close it later with `kopos rooms gc`. Supervisor only.
 func (s *State) opPlanUnassign(req Request) Response {
 	from := strVal(req.Args, "from")
 	slug := strVal(req.Args, "slug")
@@ -427,8 +478,6 @@ func (s *State) opPlanUnassign(req Request) Response {
 	planCopy := *plan
 	s.mu.Unlock()
 	s.persistPlan(&planCopy)
-
-	s.archiveRoom(slug)
 
 	return Response{OK: true, Data: assignmentToMap(*asgn)}
 }
@@ -478,17 +527,12 @@ func (s *State) opPlanStatus(req Request) Response {
 		return errorResponse(CodeError, "invalid_status", "valid values: open, assigned, in-progress, ready, blocked, merged", "invalid status: "+status, map[string]any{"status": status})
 	}
 
-	archive := status == statusMerged
 	asgn.Status = status
 	asgn.UpdatedAt = time.Now()
 	plan.UpdatedAt = time.Now()
 	planCopy := *plan
 	s.mu.Unlock()
 	s.persistPlan(&planCopy)
-
-	if archive {
-		s.archiveRoom(slug)
-	}
 
 	return Response{OK: true, Data: assignmentToMap(*asgn)}
 }

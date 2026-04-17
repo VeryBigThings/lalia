@@ -5,6 +5,60 @@ import (
 	"testing"
 )
 
+// TestRoomsGCArchivePersistsAcrossRestart: `rooms gc` archives a merged-room;
+// after daemon restart the room is still archived and new posts are rejected.
+// Guards the invariant that archive state lives in SQLite, not derived from
+// plan status at boot.
+func TestRoomsGCArchivePersistsAcrossRestart(t *testing.T) {
+	koposHome := setupIntegrationEnv(t)
+	defer stopDaemonForHome(t, koposHome)
+
+	mustRequest(t, "register", map[string]any{"name": "sup", "pid": float64(9001), "role": "supervisor"})
+	mustRequest(t, "register", map[string]any{"name": "alice", "pid": float64(9002), "role": "worker"})
+
+	// Supervisor needs an explicit project id because integration env has no git.
+	proj := "gc-test"
+	if r := mustRequest(t, "plan_create", map[string]any{
+		"from": "sup", "project": proj, "slug": "feat-done", "goal": "x",
+	}); !r.OK {
+		t.Fatalf("plan_create: %+v", r)
+	}
+	if r := mustRequest(t, "plan_assign", map[string]any{
+		"from": "sup", "project": proj, "slug": "feat-done", "owner": "alice", "worktree": "/tmp",
+	}); !r.OK {
+		t.Fatalf("plan_assign: %+v", r)
+	}
+	if r := mustRequest(t, "plan_status", map[string]any{
+		"from": "sup", "project": proj, "slug": "feat-done", "status": "merged",
+	}); !r.OK {
+		t.Fatalf("plan_status merged: %+v", r)
+	}
+
+	// Room must still be live: unassigned/merged no longer auto-archive.
+	postLive := mustRequest(t, "post", map[string]any{"from": "sup", "room": "feat-done", "body": "post-merge note"})
+	if !postLive.OK {
+		t.Fatalf("post to live merged room should succeed, got %+v", postLive)
+	}
+
+	// GC archives the room.
+	gc := mustRequest(t, "rooms_gc", map[string]any{"from": "sup"})
+	if !gc.OK {
+		t.Fatalf("rooms_gc: %+v", gc)
+	}
+
+	restartDaemon(t, koposHome)
+
+	mustRequest(t, "register", map[string]any{"name": "sup", "pid": float64(9003), "role": "supervisor"})
+	mustRequest(t, "register", map[string]any{"name": "alice", "pid": float64(9004), "role": "worker"})
+
+	// Post must be rejected because the room is archived — and that state
+	// must have survived the restart via SQLite, not plan-status derivation.
+	postAfter := mustRequest(t, "post", map[string]any{"from": "sup", "room": "feat-done", "body": "should fail"})
+	if postAfter.OK {
+		t.Fatalf("post to archived room after restart should fail, got %+v", postAfter)
+	}
+}
+
 // restartDaemon stops the current daemon and triggers a fresh one on the
 // next request() call. Returns once the old socket is gone.
 func restartDaemon(t *testing.T, koposHome string) {

@@ -115,6 +115,8 @@ agents deregister.
 ## Room commands
 
     kopos rooms
+    kopos rooms gc                                # supervisor: archive rooms
+                                                  # whose assignments are merged
     kopos room create <name> [--desc <text>]
     kopos join <room>
     kopos leave <room>
@@ -122,6 +124,12 @@ agents deregister.
     kopos post <room> "msg"                       # async broadcast
     kopos read <room> --room [--timeout N]        # consume from room
     kopos peek <room> --room                      # inspect room mailbox
+
+Rooms are never auto-deleted. "plan unassign" and "plan status merged" leave
+the slug room live so reviewers and reassignees can keep the thread going.
+When a workstream is truly done, the project supervisor runs "kopos rooms gc"
+to archive (no new posts; history preserved) every merged-assignment room in
+plans they supervise.
 
 Room mailbox per member is bounded at 64 messages. If overflow, oldest
 are dropped and the next read includes a "notice" entry
@@ -255,8 +263,8 @@ supervisor has non-merged assignments; run plan handoff first.
 
     kopos plan create <slug> [--goal <text>]
     kopos plan assign <slug> <agent> --worktree <path> [--goal <text>] [--kickoff <text>]
-    kopos plan unassign <slug>           (archives slug room; no more posts)
-    kopos plan status <slug> merged      (archives slug room)
+    kopos plan unassign <slug>
+    kopos plan status <slug> merged
     kopos plan handoff <new-supervisor>
     kopos plan show [--project <id>]     (anyone; defaults to cwd project)
 
@@ -271,8 +279,11 @@ supervisor has non-merged assignments; run plan handoff first.
     open → assigned      (supervisor: plan assign)
     open → in-progress   (worker:     plan claim)
     assigned → *         (owner:      plan status in-progress|ready|blocked)
-    * → merged           (supervisor: plan status merged)   — archives room
-    * → open             (supervisor: plan unassign)        — archives room
+    * → merged           (supervisor: plan status merged)
+    * → open             (supervisor: plan unassign)
+
+Rooms are kept live through these transitions. Closing a merged room is an
+explicit, supervisor-driven cleanup step — see "Rooms GC" below.
 
 ### Kickoff messages
 
@@ -287,6 +298,17 @@ plan assign auto-creates a room named after the slug and joins both the
 supervisor and the owner. Use kopos post <slug> to coordinate in that room.
 
 Exit code 7 = supervisor_busy (unregister blocked; call plan handoff first).
+
+### Rooms GC
+
+    kopos rooms gc
+
+Archives every slug room whose backing assignment has status=merged in a
+plan you supervise. Archived rooms reject new posts but keep their
+membership and full history intact; members can still read the thread.
+Workers are rejected (exit code 6). Idempotent — re-running archives
+nothing new. This is the only way kopos closes a workstream room; the
+plan transitions themselves no longer touch rooms.
 
 ## Common mistakes
 

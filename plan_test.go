@@ -251,9 +251,11 @@ func TestPlanFileRoundTrip(t *testing.T) {
 	}
 }
 
-// TestMergedAssignmentRestoresArchivedRoomOnLoad verifies that loadPlans
-// recreates an archived room stub for merged assignments (daemon restart case).
-func TestMergedAssignmentRestoresArchivedRoomOnLoad(t *testing.T) {
+// TestMergedAssignmentDoesNotAutoArchiveRoomOnLoad verifies that loadPlans
+// no longer synthesises an archived room stub for merged assignments.
+// Archive state is persisted explicitly via queue.roomSetArchived and is
+// restored by loadRooms — merged status by itself no longer implies archived.
+func TestMergedAssignmentDoesNotAutoArchiveRoomOnLoad(t *testing.T) {
 	ws := filepath.Join(t.TempDir(), "workspace")
 	t.Setenv("KOPOS_WORKSPACE", ws)
 
@@ -272,16 +274,10 @@ func TestMergedAssignmentRestoresArchivedRoomOnLoad(t *testing.T) {
 		t.Fatalf("loadPlans: %v", err)
 	}
 	s.mu.Lock()
-	r, ok := s.rooms["done-task"]
+	_, ok := s.rooms["done-task"]
 	s.mu.Unlock()
-	if !ok {
-		t.Fatalf("archived room stub should have been created for merged assignment")
-	}
-	r.mu.Lock()
-	archived := r.Archived
-	r.mu.Unlock()
-	if !archived {
-		t.Fatalf("room should be archived for merged assignment")
+	if ok {
+		t.Fatalf("loadPlans must not synthesise rooms for merged assignments")
 	}
 }
 
@@ -319,9 +315,11 @@ func TestPlanAssignAutoCreatesRoom(t *testing.T) {
 	}
 }
 
-// TestUnassignAndMergedArchiveRoom verifies that both plan unassign and
-// status=merged archive the slug room, blocking further posts.
-func TestUnassignAndMergedArchiveRoom(t *testing.T) {
+// TestUnassignAndMergedLeaveRoomLive verifies that neither plan unassign nor
+// status=merged archives the slug room. The room stays open so reviewers,
+// reassignees, and post-merge discussion can keep posting. Archival is an
+// explicit supervisor action via `kopos rooms gc`.
+func TestUnassignAndMergedLeaveRoomLive(t *testing.T) {
 	for _, scenario := range []string{"unassign", "merged"} {
 		t.Run(scenario, func(t *testing.T) {
 			s := newFixtureState()
@@ -332,7 +330,6 @@ func TestUnassignAndMergedArchiveRoom(t *testing.T) {
 			p.Assignments = append(p.Assignments, Assignment{
 				Slug: "feat-x", Owner: "alice", Status: statusInProgress,
 			})
-			// Create room and join sup so opPost membership check passes later.
 			r := s.ensureRoomWithMembers("feat-x", "sup", []string{"sup", "alice"})
 
 			var resp Response
@@ -352,18 +349,89 @@ func TestUnassignAndMergedArchiveRoom(t *testing.T) {
 			r.mu.Lock()
 			archived := r.Archived
 			r.mu.Unlock()
-			if !archived {
-				t.Fatalf("room should be archived after %s", scenario)
+			if archived {
+				t.Fatalf("room must NOT be archived after %s (archival is opt-in via rooms gc)", scenario)
 			}
 
-			// Post to archived room must be refused.
 			post := s.opPost(Request{Args: map[string]any{
 				"from": "sup", "room": "feat-x", "body": "hello",
 			}})
-			if post.OK {
-				t.Fatalf("post to archived room should fail after %s", scenario)
+			if !post.OK {
+				t.Fatalf("post to live room after %s should succeed, got %+v", scenario, post)
 			}
 		})
+	}
+}
+
+// TestRoomsGCArchivesMergedRooms verifies that `kopos rooms gc` archives
+// rooms backed by merged assignments in plans the caller supervises, and
+// leaves in-progress rooms untouched.
+func TestRoomsGCArchivesMergedRooms(t *testing.T) {
+	s := newFixtureState()
+	mustRegisterRole(t, s, "sup", "supervisor", 1)
+	mustRegisterRole(t, s, "alice", "worker", 2)
+
+	p := seedPlan(s, "myproject", "sup")
+	p.Assignments = []Assignment{
+		{Slug: "done-a", Owner: "alice", Status: statusMerged},
+		{Slug: "done-b", Owner: "alice", Status: statusMerged},
+		{Slug: "live-c", Owner: "alice", Status: statusInProgress},
+	}
+	for _, slug := range []string{"done-a", "done-b", "live-c"} {
+		s.ensureRoomWithMembers(slug, "sup", []string{"sup", "alice"})
+	}
+
+	resp := s.opRoomsGC(Request{Args: map[string]any{"from": "sup"}})
+	if !resp.OK {
+		t.Fatalf("rooms gc failed: %+v", resp)
+	}
+	data := resp.Data.(map[string]any)
+	if cnt, _ := data["count"].(int); cnt != 2 {
+		t.Fatalf("expected 2 rooms archived, got %v", data["count"])
+	}
+
+	for _, slug := range []string{"done-a", "done-b"} {
+		s.mu.Lock()
+		r := s.rooms[slug]
+		s.mu.Unlock()
+		r.mu.Lock()
+		archived := r.Archived
+		r.mu.Unlock()
+		if !archived {
+			t.Fatalf("merged room %s should be archived after gc", slug)
+		}
+	}
+	s.mu.Lock()
+	liveRoom := s.rooms["live-c"]
+	s.mu.Unlock()
+	liveRoom.mu.Lock()
+	liveArchived := liveRoom.Archived
+	liveRoom.mu.Unlock()
+	if liveArchived {
+		t.Fatalf("in-progress room live-c must NOT be archived by gc")
+	}
+
+	// Idempotent: second gc archives nothing new.
+	resp2 := s.opRoomsGC(Request{Args: map[string]any{"from": "sup"}})
+	if !resp2.OK {
+		t.Fatalf("second rooms gc failed: %+v", resp2)
+	}
+	data2 := resp2.Data.(map[string]any)
+	if cnt, _ := data2["count"].(int); cnt != 0 {
+		t.Fatalf("idempotent gc should archive 0 on second run, got %v", cnt)
+	}
+}
+
+// TestRoomsGCWorkerRejected verifies that a worker calling rooms gc is denied.
+func TestRoomsGCWorkerRejected(t *testing.T) {
+	s := newFixtureState()
+	mustRegisterRole(t, s, "alice", "worker", 1)
+	resp := s.opRoomsGC(Request{Args: map[string]any{"from": "alice"}})
+	if resp.OK {
+		t.Fatalf("worker must not be allowed to rooms gc")
+	}
+	if resp.Code != CodeUnauthorized {
+		t.Fatalf("expected unauthorized, got code=%d reason=%+v", resp.Code, resp.Data)
 	}
 }
 

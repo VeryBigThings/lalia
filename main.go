@@ -113,6 +113,8 @@ Usage:
   kopos read-any [--timeout N]          block on ANY channel or room
 
   kopos rooms                           list known rooms
+  kopos rooms gc                        supervisor: archive rooms for merged
+                                        assignments in plans you supervise
   kopos room create <name> [--desc <text>]
   kopos join <room>
   kopos leave <room>

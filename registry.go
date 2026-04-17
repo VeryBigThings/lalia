@@ -116,6 +116,7 @@ func (s *State) loadRooms() error {
 			Desc:      rec.desc,
 			CreatedBy: rec.createdBy,
 			CreatedAt: createdAt,
+			Archived:  rec.archived,
 			members:   make(map[string]bool),
 			mailbox:   make(map[string][]RoomMessage),
 			dropped:   make(map[string]int),

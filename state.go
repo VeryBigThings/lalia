@@ -319,6 +319,8 @@ func (s *State) dispatch(req Request) Response {
 		return s.opResolve(req)
 	case "rooms":
 		return s.opRooms(req)
+	case "rooms_gc":
+		return s.opRoomsGC(req)
 	case "room_create":
 		return s.opRoomCreate(req)
 	case "join":
