@@ -23,16 +23,27 @@ func init() {
 
 func setupIntegrationEnv(t *testing.T) string {
 	t.Helper()
-	home := t.TempDir()
-	workspace := filepath.Join(home, "workspace")
+	base, err := os.MkdirTemp("", "ls-")
+	if err != nil {
+		t.Fatalf("mktemp base dir: %v", err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(base) })
+
+	home := filepath.Join(base, "h")
+	lescheHome := filepath.Join(base, "lh")
+	workspace := filepath.Join(base, "w")
+	if err := os.MkdirAll(home, 0700); err != nil {
+		t.Fatalf("mkdir home: %v", err)
+	}
 	t.Setenv("HOME", home)
+	t.Setenv("LESCHE_HOME", lescheHome)
 	t.Setenv("LESCHE_WORKSPACE", workspace)
-	return home
+	return lescheHome
 }
 
-func stopDaemonForHome(t *testing.T, home string) {
+func stopDaemonForHome(t *testing.T, lescheHome string) {
 	t.Helper()
-	pidFile := filepath.Join(home, ".lesche", "pid")
+	pidFile := filepath.Join(lescheHome, "pid")
 	data, err := os.ReadFile(pidFile)
 	if err != nil {
 		return
@@ -47,7 +58,7 @@ func stopDaemonForHome(t *testing.T, home string) {
 	}
 	_ = proc.Signal(syscall.SIGTERM)
 
-	sock := filepath.Join(home, ".lesche", "sock")
+	sock := filepath.Join(lescheHome, "sock")
 	deadline := time.Now().Add(3 * time.Second)
 	for time.Now().Before(deadline) {
 		if _, err := os.Stat(sock); os.IsNotExist(err) {
@@ -84,8 +95,8 @@ type requestResult struct {
 }
 
 func TestIntegrationRequestFlow(t *testing.T) {
-	home := setupIntegrationEnv(t)
-	defer stopDaemonForHome(t, home)
+	lescheHome := setupIntegrationEnv(t)
+	defer stopDaemonForHome(t, lescheHome)
 
 	ra := mustRequest(t, "register", map[string]any{"name": "alice", "pid": float64(101)})
 	if !ra.OK {
