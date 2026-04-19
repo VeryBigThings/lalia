@@ -218,6 +218,62 @@ func TestParseRoomMsgFileRoundTrip(t *testing.T) {
 	}
 }
 
+// TestEnsureRoomWithMembersPersistedToSQLite: ensureRoomWithMembers must write
+// the room row and ALL initial members (including the creator pre-populated by
+// newRoom) to SQLite so that loadRooms can reconstruct them after restart.
+func TestEnsureRoomWithMembersPersistedToSQLite(t *testing.T) {
+	workspace := t.TempDir()
+	t.Setenv("KOPOS_WORKSPACE", workspace)
+	q, _ := mustOpenTestQueue(t)
+
+	s := newFixtureState()
+	s.queue = q
+
+	// First call: creates the room. createdBy="sup" is pre-populated by newRoom,
+	// so without the fix it would never appear in `added` and roomAddMember
+	// would not be called for it.
+	s.ensureRoomWithMembers("my-room", "sup", []string{"sup"})
+
+	rows, err := q.roomRows()
+	if err != nil {
+		t.Fatalf("roomRows: %v", err)
+	}
+	if len(rows) != 1 || rows[0].name != "my-room" {
+		t.Fatalf("expected 1 room row 'my-room', got %+v", rows)
+	}
+
+	members, err := q.roomMemberRows()
+	if err != nil {
+		t.Fatalf("roomMemberRows: %v", err)
+	}
+	if !contains(members["my-room"], "sup") {
+		t.Fatalf("expected 'sup' in SQLite members, got %v", members["my-room"])
+	}
+
+	// Second call: adds a new member to an existing room.
+	s.ensureRoomWithMembers("my-room", "sup", []string{"sup", "worker"})
+
+	members2, err := q.roomMemberRows()
+	if err != nil {
+		t.Fatalf("roomMemberRows after second call: %v", err)
+	}
+	if !contains(members2["my-room"], "sup") {
+		t.Fatalf("expected 'sup' in SQLite members after second call, got %v", members2["my-room"])
+	}
+	if !contains(members2["my-room"], "worker") {
+		t.Fatalf("expected 'worker' in SQLite members after second call, got %v", members2["my-room"])
+	}
+}
+
+func contains(slice []string, s string) bool {
+	for _, v := range slice {
+		if v == s {
+			return true
+		}
+	}
+	return false
+}
+
 // TestRepublishBundleSurvivesRestart: publish → post follow-up → daemon restart
 // → kopos history returns both messages.
 func TestRepublishBundleSurvivesRestart(t *testing.T) {
