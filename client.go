@@ -187,12 +187,16 @@ func cmdAgents(_ []string) {
 			return
 		}
 		// Print header
-		fmt.Printf("%-26s  %-16s  %-28s  %-12s  %s\n",
-			"agent_id", "name", "qualified", "harness", "started_at")
+		fmt.Printf("%-26s  %-16s  %-28s  %-12s  %-7s  %s\n",
+			"agent_id", "name", "qualified", "harness", "lease", "started_at")
 		for _, row := range rows {
 			m := row.(map[string]any)
-			fmt.Printf("%-26s  %-16s  %-28s  %-12s  %v\n",
-				m["agent_id"], m["name"], m["qualified"], m["harness"], m["started_at"])
+			lease, _ := m["lease_status"].(string)
+			if lease == "" {
+				lease = "?"
+			}
+			fmt.Printf("%-26s  %-16s  %-28s  %-12s  %-7s  %v\n",
+				m["agent_id"], m["name"], m["qualified"], m["harness"], lease, m["started_at"])
 		}
 	})
 }
@@ -643,18 +647,29 @@ func cmdTask(args []string) {
 
 	case "unpublish":
 		if len(rest) < 1 || rest[0] == "" || rest[0][0] == '-' {
-			fmt.Fprintln(os.Stderr, "usage: kopos task unpublish <slug> [--force] [--project <id>]")
+			fmt.Fprintln(os.Stderr, "usage: kopos task unpublish <slug> [--force] [--wipe-worktree] [--evict-owner] [--project <id>]")
 			os.Exit(1)
 		}
 		slug := rest[0]
-		force := parseBoolFlag(rest, "--force")
 		resp, err := request("task_unpublish", map[string]any{
-			"from": from, "project": proj, "slug": slug, "force": force,
+			"from":           from,
+			"project":        proj,
+			"slug":           slug,
+			"force":          parseBoolFlag(rest, "--force"),
+			"wipe_worktree":  parseBoolFlag(rest, "--wipe-worktree"),
+			"evict_owner":    parseBoolFlag(rest, "--evict-owner"),
 		})
 		handle(resp, err, func(data any) {
 			m := data.(map[string]any)
-			fmt.Printf("unpublished slug=%s worktree_removed=%v room_archived=%v\n",
+			fmt.Printf("unpublished slug=%s worktree_removed=%v room_archived=%v",
 				m["slug"], m["worktree_removed"], m["room_archived"])
+			if preserved, ok := m["worktree_preserved"].(string); ok && preserved != "" {
+				fmt.Printf(" worktree_preserved=%s", preserved)
+			}
+			if remErr, ok := m["worktree_remove_error"].(string); ok && remErr != "" {
+				fmt.Printf(" remove_error=%q", remErr)
+			}
+			fmt.Println()
 		})
 
 	case "show":

@@ -163,6 +163,8 @@ _kopos() {
                                     _arguments \
                                         '1:slug:' \
                                         '--force[allow even if owned or room has traffic]' \
+                                        '--wipe-worktree[also remove the worktree kopos created]' \
+                                        '--evict-owner[override the live-owner gate during --wipe-worktree]' \
                                         '--project[id]:id:'
                                     ;;
                                 handoff)

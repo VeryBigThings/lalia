@@ -140,7 +140,8 @@ Tasks (supervisor publishes, workers pull):
   kopos task status <slug> <in-progress|ready|blocked|merged> [--project <id>]
   kopos task unassign <slug> [--project <id>]
   kopos task reassign <slug> <agent> [--project <id>]
-  kopos task unpublish <slug> [--force] [--project <id>]   retract a published task
+  kopos task unpublish <slug> [--force] [--wipe-worktree] [--evict-owner] [--project <id>]
+                                             retract a published task; worktree preserved by default
   kopos task show [<slug>] [--project <id>]
   kopos task list
   kopos task handoff <new-supervisor> [--project <id>]

@@ -64,7 +64,7 @@ _kopos() {
                     COMPREPLY=( $(compgen -W "--project" -- "$cur") )
                     ;;
                 unpublish)
-                    COMPREPLY=( $(compgen -W "--force --project" -- "$cur") )
+                    COMPREPLY=( $(compgen -W "--force --wipe-worktree --evict-owner --project" -- "$cur") )
                     ;;
                 claim|bulletin|show|list|unassign|handoff)
                     COMPREPLY=( $(compgen -W "--project" -- "$cur") )

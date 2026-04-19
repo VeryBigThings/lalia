@@ -344,24 +344,39 @@ repo).
 
 ### Retracting a task
 
-    kopos task unpublish <slug> [--force]
+    kopos task unpublish <slug> [--force] [--wipe-worktree] [--evict-owner]
 
 Use this when a task was published in error (typo, wrong scope, wrong
-project). Removes the task row, archives its room, and — if the worktree
-kopos created is clean — removes the worktree too. Supervisor-only.
+project). Supervisor-only. Two independent decisions:
 
-Safety:
-- If the task has no owner and no room messages beyond the bundle,
-  unpublish proceeds without --force.
-- If the task is owned or the room has real conversation, unpublish
-  requires --force.
-- If the worktree has uncommitted changes or commits ahead of its
-  upstream, unpublish fails loudly and changes nothing — even with
-  --force. Clean up the worktree manually first; kopos will never
-  silently discard work.
+Row + room removal (always):
+- Default: if the task has no owner and the room has no traffic beyond
+  the bundle, unpublish drops the row and archives the room.
+- --force: same, but allowed when the task has an owner or real room
+  conversation.
 
-After a successful unpublish the slug is free; re-publishing it works
-as if the first publish never happened.
+Worktree removal (opt-in, off by default):
+- By default the worktree is left on disk. Coding agents often have a
+  live cwd inside the worktree; wiping it would crash them.
+- --wipe-worktree: additionally remove the worktree kopos created.
+  Subject to two safety gates:
+    · Dirty worktree (uncommitted or unpushed): refused. Hard gate, no
+      override. Clean up the worktree manually first.
+    · Live owner lease: refused unless --evict-owner is also passed.
+      "Live" means the owner agent's lease has not expired
+      (see "kopos agents", lease column).
+
+If any safety gate refuses, the whole call fails and nothing changes on
+disk or in state. Re-publishing the same slug later un-archives the
+room and reuses it, so the bundle thread is preserved across a
+mistaken-unpublish cycle.
+
+Response fields:
+- worktree_removed: true only when the directory is verifiably gone.
+- worktree_preserved: "default" (no --wipe-worktree) or "remove_failed"
+  (remove was attempted but the directory is still present — see
+  worktree_remove_error for detail).
+- room_archived: whether the room is now archived.
 
 ### Rooms GC
 

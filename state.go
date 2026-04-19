@@ -820,8 +820,14 @@ func (s *State) deliverAny(to, kind, target string, msg Message) bool {
 func (s *State) opAgents() Response {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	now := time.Now()
 	data := make([]any, 0, len(s.agents))
 	for _, a := range s.agents {
+		live := now.Before(a.ExpiresAt)
+		leaseStatus := "expired"
+		if live {
+			leaseStatus = "live"
+		}
 		data = append(data, map[string]any{
 			"agent_id":     a.AgentID,
 			"name":         a.Name,
@@ -831,6 +837,8 @@ func (s *State) opAgents() Response {
 			"started_at":   a.StartedAt.Format(time.RFC3339),
 			"last_seen_at": a.LastSeenAt.Format(time.RFC3339),
 			"expires_at":   a.ExpiresAt.Format(time.RFC3339),
+			"lease_status": leaseStatus,
+			"live":         live,
 		})
 	}
 	return Response{OK: true, Data: data}

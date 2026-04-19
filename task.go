@@ -275,6 +275,30 @@ func (s *State) archiveRoom(slug string) bool {
 	return true
 }
 
+// unarchiveRoom clears the archived flag so posts are accepted again.
+// Must NOT be called with s.mu held. Safe to call if the room does not
+// exist or is already un-archived. Returns true if the room existed and
+// was flipped from archived to open.
+func (s *State) unarchiveRoom(slug string) bool {
+	s.mu.Lock()
+	r, ok := s.rooms[slug]
+	s.mu.Unlock()
+	if !ok {
+		return false
+	}
+	r.mu.Lock()
+	wasArchived := r.Archived
+	r.Archived = false
+	r.mu.Unlock()
+	if !wasArchived {
+		return false
+	}
+	if s.queue != nil {
+		_ = s.queue.roomSetArchived(slug, false)
+	}
+	return true
+}
+
 // internalPost appends a message to the room's log and delivers to mailboxes
 // without requiring `from` to be a registered agent or room member.
 // The caller must ensure the room is not archived before calling.
@@ -497,20 +521,30 @@ func branchExists(repoRoot, branch string) bool {
 	return err == nil
 }
 
+// canonicalPath normalizes a path via EvalSymlinks when the target exists,
+// falling back to Abs otherwise. This is needed on macOS where /var is a
+// symlink to /private/var: filepath.Abs on a test tempdir yields /var/...
+// while `git worktree list` reports /private/var/..., and a naive string
+// compare misses the match on republish-against-existing-worktree.
+func canonicalPath(p string) string {
+	if real, err := filepath.EvalSymlinks(p); err == nil {
+		return real
+	}
+	abs, _ := filepath.Abs(p)
+	return abs
+}
+
 // ensureWorktree makes sure a worktree exists at target on branch, creating
 // it if needed. Returns (didCreate, error). Idempotent: if the target already
 // hosts that branch, returns (false, nil).
 func ensureWorktree(repoRoot, target, branch string) (bool, error) {
-	absTarget, err := filepath.Abs(target)
-	if err != nil {
-		return false, err
-	}
+	absTarget := canonicalPath(target)
 	entries, err := listWorktrees(repoRoot)
 	if err != nil {
 		return false, fmt.Errorf("list worktrees: %w", err)
 	}
 	for _, e := range entries {
-		absE, _ := filepath.Abs(e.Path)
+		absE := canonicalPath(e.Path)
 		if absE == absTarget {
 			if e.Branch == branch {
 				return false, nil
@@ -543,11 +577,19 @@ func ensureWorktree(repoRoot, target, branch string) (bool, error) {
 	return true, nil
 }
 
-// removeWorktree runs `git worktree remove --force` to undo a just-created
-// worktree. Best-effort; errors are logged but not returned because the
-// caller is already in a rollback path.
-func removeWorktree(repoRoot, target string) {
-	_ = exec.Command("git", "-C", repoRoot, "worktree", "remove", "--force", target).Run()
+// removeWorktree runs `git worktree remove --force` and verifies the
+// target directory is gone from disk afterwards. Returns nil only when
+// removal is observable; returns a descriptive error otherwise so callers
+// can surface honest state to users instead of computing optimistic flags.
+func removeWorktree(repoRoot, target string) error {
+	out, err := exec.Command("git", "-C", repoRoot, "worktree", "remove", "--force", target).CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("git worktree remove: %s", strings.TrimSpace(string(out)))
+	}
+	if _, err := os.Stat(target); err == nil {
+		return fmt.Errorf("worktree still present at %s after remove", target)
+	}
+	return nil
 }
 
 // opTaskPublish creates N tasks + worktrees + rooms + bundle posts in a
@@ -734,6 +776,10 @@ func (s *State) opTaskPublish(req Request) Response {
 		// Ensure the room exists with the supervisor as a member, and post
 		// the bundle message — unless this is a pure idempotent republish.
 		r := s.ensureRoomWithMembers(in.Slug, from, []string{from})
+		// Republishing a previously-unpublished slug leaves the room
+		// archived; clear the flag so posts go through and the invariant
+		// "archived = done" stays honest.
+		s.unarchiveRoom(in.Slug)
 		s.persistRoomDefinition(r)
 		s.persistRoomMembers(r)
 		if !created && alreadyOpen {
@@ -1151,22 +1197,32 @@ func worktreeIsClean(worktree string) (bool, string) {
 	return true, ""
 }
 
-// opTaskUnpublish retracts a published task. Supervisor-only. Removes the
-// task row, archives the room, and — if the worktree is clean — removes
-// the worktree kopos created. Safety gates:
+// opTaskUnpublish retracts a published task. Supervisor-only.
 //
-//   - If the task has an owner or the room has non-bundle traffic (>1
-//     message), refuses without --force.
-//   - If the worktree is dirty (uncommitted changes or unpushed commits),
-//     refuses regardless of --force and leaves state unchanged.
+// Default behavior removes the task row and archives the room. It does
+// NOT touch the worktree kopos created — worktrees often hold a live
+// agent's cwd, so wiping them is opt-in via --wipe-worktree.
 //
-// Designed so a supervisor can back out a typo or mistaken publish without
-// ever silently discarding worker commits.
+// Safety gates (any refusal fails the whole call; no half-executed state):
+//
+//   - Auth: worker callers rejected.
+//   - Row gate: if the task has an owner or the room has non-bundle
+//     traffic, requires `force=true`.
+//   - Wipe gate (only if `wipe_worktree=true`):
+//       · If the worktree is dirty (uncommitted or unpushed), refuses
+//         regardless of any flag — never silently discards work.
+//       · If the current owner's lease is still live, refuses unless
+//         `evict_owner=true`. Lease-only liveness: `now < ExpiresAt`.
+//
+// Accurate response fields: `worktree_removed` is derived from a real
+// post-remove filesystem check, not from "we tried."
 func (s *State) opTaskUnpublish(req Request) Response {
 	from := strVal(req.Args, "from")
 	slug := strVal(req.Args, "slug")
 	pid := strVal(req.Args, "project")
 	force, _ := req.Args["force"].(bool)
+	wipeWorktree, _ := req.Args["wipe_worktree"].(bool)
+	evictOwner, _ := req.Args["evict_owner"].(bool)
 
 	if from == "" {
 		return errorResponse(CodeError, "missing_from", "set KOPOS_NAME or pass --as", "from required", nil)
@@ -1197,32 +1253,41 @@ func (s *State) opTaskUnpublish(req Request) Response {
 	repoRoot := tl.RepoRoot
 	s.mu.Unlock()
 
-	// Count room traffic to distinguish "only the bundle" from "real
-	// conversation." The bundle is always the first post on a published
-	// task's room, so msgCount ≤ 1 means no traffic beyond bundle.
+	// Count room traffic. The bundle is the first post on a published
+	// task's room, so msgCount ≤ 1 means no traffic beyond the bundle.
 	var msgCount int
 	s.mu.Lock()
-	r, hasRoom := s.rooms[slug]
+	_, hasRoom := s.rooms[slug]
 	s.mu.Unlock()
 	if hasRoom {
-		r.mu.Lock()
-		msgCount = len(r.log)
-		r.mu.Unlock()
+		s.mu.Lock()
+		rr := s.rooms[slug]
+		s.mu.Unlock()
+		rr.mu.Lock()
+		msgCount = len(rr.log)
+		rr.mu.Unlock()
 	}
 
 	hasOwner := taskCopy.Owner != ""
 	hasTraffic := msgCount > 1
+
+	// --- Row gate ---
 	if (hasOwner || hasTraffic) && !force {
 		return errorResponse(CodeError, "unpublish_needs_force", "re-run with --force to proceed; the task has active state", "task "+slug+" has owner or room traffic — unpublish requires --force", map[string]any{
-			"slug":       slug,
-			"owner":      taskCopy.Owner,
-			"room_msgs":  msgCount,
+			"slug":        slug,
+			"owner":       taskCopy.Owner,
+			"room_msgs":   msgCount,
 			"bundle_only": !hasTraffic,
 		})
 	}
 
-	// Worktree cleanliness is a hard gate: never silently discard work.
-	if taskCopy.Worktree != "" {
+	// --- Wipe gate (only when the caller asked for a worktree removal) ---
+	var worktreePreserved string
+	if !wipeWorktree {
+		worktreePreserved = "default"
+	}
+	if wipeWorktree && taskCopy.Worktree != "" {
+		// Hard gate: dirty worktree refuses regardless of --evict-owner.
 		if clean, detail := worktreeIsClean(taskCopy.Worktree); !clean {
 			return errorResponse(CodeError, "worktree_not_clean", "commit or push work in the worktree, or delete it manually, then retry", "worktree "+taskCopy.Worktree+" is not clean: "+detail, map[string]any{
 				"slug":     slug,
@@ -1230,48 +1295,90 @@ func (s *State) opTaskUnpublish(req Request) Response {
 				"detail":   detail,
 			})
 		}
-	}
-
-	// Remove the worktree under the per-repo lock (same serialization
-	// domain as publish).
-	if taskCopy.Worktree != "" && repoRoot != "" {
-		rl := s.repoLock(repoRoot)
-		rl.Lock()
-		removeWorktree(repoRoot, taskCopy.Worktree)
-		rl.Unlock()
-	}
-
-	// Archive the room (if present). Archive survives restart via the
-	// same SQLite-backed flag rooms_gc uses.
-	if hasRoom {
-		s.archiveRoom(slug)
-	}
-
-	// Drop the task row from the list.
-	s.mu.Lock()
-	tl = s.tasks[pid]
-	if tl == nil {
-		s.mu.Unlock()
-		return Response{OK: true, Data: map[string]any{"slug": slug, "removed": true}}
-	}
-	filtered := tl.Tasks[:0]
-	for _, existing := range tl.Tasks {
-		if existing.Slug != slug {
-			filtered = append(filtered, existing)
+		// Liveness gate: if owner's lease is still live, refuse without
+		// --evict-owner. Missing owner / unregistered agent counts as
+		// not-live.
+		if hasOwner {
+			s.mu.Lock()
+			ownerAgent := s.agentByName(taskCopy.Owner)
+			var leaseExpiresAt time.Time
+			var ownerAgentID string
+			if ownerAgent != nil {
+				leaseExpiresAt = ownerAgent.ExpiresAt
+				ownerAgentID = ownerAgent.AgentID
+			}
+			s.mu.Unlock()
+			ownerLive := ownerAgent != nil && time.Now().Before(leaseExpiresAt)
+			if ownerLive && !evictOwner {
+				return errorResponse(CodeError, "owner_lease_live", "wait for the owner to unregister or pass --evict-owner to override", "owner "+taskCopy.Owner+"'s lease is live until "+leaseExpiresAt.Format(time.RFC3339), map[string]any{
+					"slug":           slug,
+					"owner":          taskCopy.Owner,
+					"owner_agent_id": ownerAgentID,
+					"expires_at":     leaseExpiresAt.Format(time.RFC3339),
+				})
+			}
 		}
 	}
-	tl.Tasks = filtered
-	tl.UpdatedAt = time.Now()
-	tlCopy := *tl
-	s.mu.Unlock()
-	s.persistTaskList(&tlCopy)
 
-	return Response{OK: true, Data: map[string]any{
-		"slug":              slug,
-		"removed":           true,
-		"worktree_removed":  taskCopy.Worktree != "",
-		"room_archived":     hasRoom,
-	}}
+	// --- All gates passed. Perform the removals. ---
+
+	// Worktree removal under the per-repo lock (same serialization domain
+	// as publish).
+	worktreeRemoved := false
+	var worktreeRemoveErr string
+	if wipeWorktree && taskCopy.Worktree != "" && repoRoot != "" {
+		rl := s.repoLock(repoRoot)
+		rl.Lock()
+		err := removeWorktree(repoRoot, taskCopy.Worktree)
+		rl.Unlock()
+		if err != nil {
+			worktreeRemoveErr = err.Error()
+			worktreePreserved = "remove_failed"
+		} else {
+			worktreeRemoved = true
+		}
+	}
+
+	// Archive the room (idempotent).
+	roomArchived := false
+	if hasRoom {
+		roomArchived = s.archiveRoom(slug) || true
+		// archiveRoom returns false when the room was already archived;
+		// either way, the room is archived post-call.
+	}
+
+	// Drop the task row.
+	s.mu.Lock()
+	tl = s.tasks[pid]
+	if tl != nil {
+		filtered := tl.Tasks[:0]
+		for _, existing := range tl.Tasks {
+			if existing.Slug != slug {
+				filtered = append(filtered, existing)
+			}
+		}
+		tl.Tasks = filtered
+		tl.UpdatedAt = time.Now()
+		tlCopy := *tl
+		s.mu.Unlock()
+		s.persistTaskList(&tlCopy)
+	} else {
+		s.mu.Unlock()
+	}
+
+	out := map[string]any{
+		"slug":             slug,
+		"removed":          true,
+		"room_archived":    roomArchived,
+		"worktree_removed": worktreeRemoved,
+	}
+	if worktreePreserved != "" {
+		out["worktree_preserved"] = worktreePreserved
+	}
+	if worktreeRemoveErr != "" {
+		out["worktree_remove_error"] = worktreeRemoveErr
+	}
+	return Response{OK: true, Data: out}
 }
 
 // opTaskHandoff transfers supervisor rights from the caller to a new agent.

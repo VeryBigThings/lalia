@@ -51,6 +51,7 @@ Per-workstream atomicity: if one slug fails (branch already checked out elsewher
 - Do NOT create rooms by hand for workstreams. `task publish` creates them.
 - Do NOT post context one message at a time when bootstrapping a workstream. The bundle goes inside publish.
 - Do NOT assign a worker to a slug from your side. Workers self-claim. If you need to force a specific owner (e.g. to unstick a stalled row), use `kopos task reassign <slug> <agent>` — but the default flow is pull, not push.
+- To retract a mistaken publish, `kopos task unpublish <slug>`. This drops the row and archives the room but LEAVES THE WORKTREE ON DISK, because coding agents often have a live cwd inside it. If you also want the worktree gone, add `--wipe-worktree`. Before using `--evict-owner` to wipe a worktree over a live lease, check `kopos agents` — the `lease` column shows which agents are live right now.
 
 ### Reacting to worker traffic
 

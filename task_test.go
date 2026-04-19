@@ -677,27 +677,42 @@ func TestInitAndPromptEmitByteIdenticalOutput(t *testing.T) {
 	}
 }
 
-// TestTaskUnpublishCleanPublish removes an untouched task without --force:
-// no owner, only the bundle post in the room, clean worktree.
-func TestTaskUnpublishCleanPublish(t *testing.T) {
+// setupPublishedTask is a small helper: fresh state + git repo + one
+// published task named "feat-x" on branch feat/x with the given brief.
+func setupPublishedTask(t *testing.T, brief string) (*State, string, string) {
+	t.Helper()
 	repoRoot := mustInitGitRepo(t)
 	s := newFixtureState()
 	mustRegisterFor(t, s, "sup", "supervisor", "myproject", repoRoot, 1)
-
 	pub := s.opTaskPublish(Request{Args: map[string]any{
 		"from": "sup", "project": "myproject", "repo_root": repoRoot,
-		"workstreams": []any{map[string]any{"slug": "feat-x", "branch": "feat/x", "brief": "typo"}},
+		"workstreams": []any{map[string]any{"slug": "feat-x", "branch": "feat/x", "brief": brief}},
 	}})
 	if !pub.OK {
 		t.Fatalf("publish: %+v", pub)
 	}
 	wt := filepath.Join(filepath.Dir(repoRoot), "wt", "feat-x")
+	return s, repoRoot, wt
+}
+
+// TestTaskUnpublishPreservesWorktreeByDefault: default unpublish on a
+// clean/unowned task drops the row and archives the room but leaves the
+// worktree on disk.
+func TestTaskUnpublishPreservesWorktreeByDefault(t *testing.T) {
+	s, _, wt := setupPublishedTask(t, "typo")
 
 	resp := s.opTaskUnpublish(Request{Args: map[string]any{
 		"from": "sup", "project": "myproject", "slug": "feat-x",
 	}})
 	if !resp.OK {
-		t.Fatalf("unpublish clean publish should succeed: %+v", resp)
+		t.Fatalf("unpublish should succeed: %+v", resp)
+	}
+	data := resp.Data.(map[string]any)
+	if data["worktree_removed"] != false {
+		t.Fatalf("default unpublish must NOT remove worktree, got %v", data["worktree_removed"])
+	}
+	if data["worktree_preserved"] != "default" {
+		t.Fatalf("expected worktree_preserved=default, got %v", data["worktree_preserved"])
 	}
 
 	// Row gone.
@@ -705,51 +720,132 @@ func TestTaskUnpublishCleanPublish(t *testing.T) {
 	tl := s.tasks["myproject"]
 	s.mu.Unlock()
 	if findTask(tl, "feat-x") != nil {
-		t.Fatalf("task row should be gone after unpublish")
+		t.Fatalf("row should be gone")
 	}
-	// Worktree removed.
-	if _, err := os.Stat(wt); !os.IsNotExist(err) {
-		t.Fatalf("worktree should be removed: err=%v", err)
+	// Worktree intact on disk.
+	if _, err := os.Stat(wt); err != nil {
+		t.Fatalf("worktree must still exist on disk after default unpublish, err=%v", err)
 	}
 	// Room archived.
 	s.mu.Lock()
 	r := s.rooms["feat-x"]
 	s.mu.Unlock()
-	if r == nil {
-		t.Fatalf("room should still exist (archived, not deleted)")
-	}
 	r.mu.Lock()
 	archived := r.Archived
 	r.mu.Unlock()
 	if !archived {
-		t.Fatalf("room should be archived after unpublish")
-	}
-
-	// Republishing the same slug is allowed — the dead row is gone.
-	pub2 := s.opTaskPublish(Request{Args: map[string]any{
-		"from": "sup", "project": "myproject", "repo_root": repoRoot,
-		"workstreams": []any{map[string]any{"slug": "feat-x", "branch": "feat/x", "brief": "second try"}},
-	}})
-	if !pub2.OK {
-		t.Fatalf("republish after unpublish should succeed: %+v", pub2)
+		t.Fatalf("room should be archived")
 	}
 }
 
-// TestTaskUnpublishRefusesClaimedWithoutForce: a claimed task requires
-// --force; without it, unpublish fails and leaves state intact.
-func TestTaskUnpublishRefusesClaimedWithoutForce(t *testing.T) {
-	repoRoot := mustInitGitRepo(t)
-	s := newFixtureState()
-	mustRegisterFor(t, s, "sup", "supervisor", "myproject", repoRoot, 1)
+// TestTaskUnpublishForceKeepsWorktreeIntact: --force allows dropping a
+// claimed task's row but must not touch the worktree.
+func TestTaskUnpublishForceKeepsWorktreeIntact(t *testing.T) {
+	s, _, wt := setupPublishedTask(t, "hi")
 	mustRegisterRole(t, s, "alice", "worker", 2)
-
-	pub := s.opTaskPublish(Request{Args: map[string]any{
-		"from": "sup", "project": "myproject", "repo_root": repoRoot,
-		"workstreams": []any{map[string]any{"slug": "feat-x", "branch": "feat/x", "brief": "hi"}},
-	}})
-	if !pub.OK {
-		t.Fatalf("publish: %+v", pub)
+	if r := s.opTaskClaim(Request{Args: map[string]any{
+		"from": "alice", "project": "myproject", "slug": "feat-x",
+	}}); !r.OK {
+		t.Fatalf("claim: %+v", r)
 	}
+
+	// Without --force: refused.
+	resp := s.opTaskUnpublish(Request{Args: map[string]any{
+		"from": "sup", "project": "myproject", "slug": "feat-x",
+	}})
+	if resp.OK {
+		t.Fatalf("claimed task unpublish without --force should fail")
+	}
+
+	// With --force: row gone, worktree intact.
+	resp2 := s.opTaskUnpublish(Request{Args: map[string]any{
+		"from": "sup", "project": "myproject", "slug": "feat-x", "force": true,
+	}})
+	if !resp2.OK {
+		t.Fatalf("--force unpublish: %+v", resp2)
+	}
+	data := resp2.Data.(map[string]any)
+	if data["worktree_removed"] != false {
+		t.Fatalf("--force (without --wipe-worktree) must NOT remove worktree")
+	}
+	if _, err := os.Stat(wt); err != nil {
+		t.Fatalf("worktree must still exist after --force unpublish, err=%v", err)
+	}
+}
+
+// TestTaskUnpublishWipeWithExpiredOwnerWipes: --wipe-worktree with an
+// owner whose lease has expired wipes the worktree.
+func TestTaskUnpublishWipeWithExpiredOwnerWipes(t *testing.T) {
+	s, _, wt := setupPublishedTask(t, "hi")
+	mustRegisterRole(t, s, "alice", "worker", 2)
+	if r := s.opTaskClaim(Request{Args: map[string]any{
+		"from": "alice", "project": "myproject", "slug": "feat-x",
+	}}); !r.OK {
+		t.Fatalf("claim: %+v", r)
+	}
+	// Expire alice's lease.
+	s.mu.Lock()
+	a := s.agentByName("alice")
+	a.ExpiresAt = time.Now().Add(-time.Minute)
+	s.mu.Unlock()
+
+	resp := s.opTaskUnpublish(Request{Args: map[string]any{
+		"from": "sup", "project": "myproject", "slug": "feat-x",
+		"force": true, "wipe_worktree": true,
+	}})
+	if !resp.OK {
+		t.Fatalf("wipe with expired owner should succeed: %+v", resp)
+	}
+	data := resp.Data.(map[string]any)
+	if data["worktree_removed"] != true {
+		t.Fatalf("worktree_removed should be true, got %v", data["worktree_removed"])
+	}
+	if _, err := os.Stat(wt); !os.IsNotExist(err) {
+		t.Fatalf("worktree should be gone from disk, err=%v", err)
+	}
+}
+
+// TestTaskUnpublishWipeRefusesLiveOwner: --wipe-worktree with a live
+// owner lease is refused. Whole call fails; nothing changes.
+func TestTaskUnpublishWipeRefusesLiveOwner(t *testing.T) {
+	s, _, wt := setupPublishedTask(t, "hi")
+	mustRegisterRole(t, s, "alice", "worker", 2)
+	if r := s.opTaskClaim(Request{Args: map[string]any{
+		"from": "alice", "project": "myproject", "slug": "feat-x",
+	}}); !r.OK {
+		t.Fatalf("claim: %+v", r)
+	}
+	// alice's lease is live from register.
+
+	resp := s.opTaskUnpublish(Request{Args: map[string]any{
+		"from": "sup", "project": "myproject", "slug": "feat-x",
+		"force": true, "wipe_worktree": true,
+	}})
+	if resp.OK {
+		t.Fatalf("wipe with live owner should refuse")
+	}
+	// Structured error mentions the owner.
+	errDetail, _ := resp.Data.(map[string]any)["error"].(ErrorDetail)
+	if errDetail.Reason != "owner_lease_live" {
+		t.Fatalf("expected reason=owner_lease_live, got %+v", resp.Data)
+	}
+	// State unchanged: row + worktree intact.
+	s.mu.Lock()
+	tl := s.tasks["myproject"]
+	s.mu.Unlock()
+	if findTask(tl, "feat-x") == nil {
+		t.Fatalf("row should still exist after refused wipe")
+	}
+	if _, err := os.Stat(wt); err != nil {
+		t.Fatalf("worktree should still exist after refused wipe, err=%v", err)
+	}
+}
+
+// TestTaskUnpublishEvictOwnerOverridesLiveLease: --evict-owner allows
+// wipe to proceed over a live lease.
+func TestTaskUnpublishEvictOwnerOverridesLiveLease(t *testing.T) {
+	s, _, wt := setupPublishedTask(t, "hi")
+	mustRegisterRole(t, s, "alice", "worker", 2)
 	if r := s.opTaskClaim(Request{Args: map[string]any{
 		"from": "alice", "project": "myproject", "slug": "feat-x",
 	}}); !r.OK {
@@ -758,90 +854,139 @@ func TestTaskUnpublishRefusesClaimedWithoutForce(t *testing.T) {
 
 	resp := s.opTaskUnpublish(Request{Args: map[string]any{
 		"from": "sup", "project": "myproject", "slug": "feat-x",
+		"force": true, "wipe_worktree": true, "evict_owner": true,
 	}})
-	if resp.OK {
-		t.Fatalf("unpublish of claimed task without --force should fail")
+	if !resp.OK {
+		t.Fatalf("wipe with --evict-owner over live lease: %+v", resp)
 	}
-
-	// State unchanged.
-	s.mu.Lock()
-	tl := s.tasks["myproject"]
-	s.mu.Unlock()
-	if findTask(tl, "feat-x") == nil {
-		t.Fatalf("row should still exist after refused unpublish")
+	data := resp.Data.(map[string]any)
+	if data["worktree_removed"] != true {
+		t.Fatalf("worktree_removed should be true after evict, got %v", data["worktree_removed"])
 	}
-
-	// With --force, it proceeds (worktree is clean).
-	resp2 := s.opTaskUnpublish(Request{Args: map[string]any{
-		"from": "sup", "project": "myproject", "slug": "feat-x", "force": true,
-	}})
-	if !resp2.OK {
-		t.Fatalf("unpublish with --force on clean-worktree claimed task should succeed: %+v", resp2)
+	if _, err := os.Stat(wt); !os.IsNotExist(err) {
+		t.Fatalf("worktree should be gone after evict, err=%v", err)
 	}
 }
 
-// TestTaskUnpublishRefusesDirtyWorktreeEvenWithForce: worktree cleanliness
-// is a hard gate. No --force overrides it — we never silently discard work.
-func TestTaskUnpublishRefusesDirtyWorktreeEvenWithForce(t *testing.T) {
-	repoRoot := mustInitGitRepo(t)
-	s := newFixtureState()
-	mustRegisterFor(t, s, "sup", "supervisor", "myproject", repoRoot, 1)
-
-	pub := s.opTaskPublish(Request{Args: map[string]any{
-		"from": "sup", "project": "myproject", "repo_root": repoRoot,
-		"workstreams": []any{map[string]any{"slug": "feat-x", "branch": "feat/x", "brief": "hi"}},
-	}})
-	if !pub.OK {
-		t.Fatalf("publish: %+v", pub)
-	}
-	wt := filepath.Join(filepath.Dir(repoRoot), "wt", "feat-x")
-	// Dirty the worktree: add an untracked file.
+// TestTaskUnpublishRefusesDirtyWorktreeEvenWithEvict: dirty worktree is
+// a hard gate that no flag overrides.
+func TestTaskUnpublishRefusesDirtyWorktreeEvenWithEvict(t *testing.T) {
+	s, _, wt := setupPublishedTask(t, "hi")
 	if err := os.WriteFile(filepath.Join(wt, "scratch"), []byte("wip\n"), 0644); err != nil {
 		t.Fatalf("dirty worktree: %v", err)
 	}
 
 	resp := s.opTaskUnpublish(Request{Args: map[string]any{
-		"from": "sup", "project": "myproject", "slug": "feat-x", "force": true,
+		"from": "sup", "project": "myproject", "slug": "feat-x",
+		"force": true, "wipe_worktree": true, "evict_owner": true,
 	}})
 	if resp.OK {
-		t.Fatalf("unpublish of dirty worktree must fail even with --force")
+		t.Fatalf("dirty worktree must refuse even with --evict-owner")
 	}
-	// Worktree still there.
+	// Worktree + row intact.
 	if _, err := os.Stat(wt); err != nil {
-		t.Fatalf("dirty worktree must be preserved: err=%v", err)
+		t.Fatalf("worktree should still exist, err=%v", err)
 	}
-	// Row still there.
 	s.mu.Lock()
 	tl := s.tasks["myproject"]
 	s.mu.Unlock()
 	if findTask(tl, "feat-x") == nil {
-		t.Fatalf("row should still exist after refused unpublish")
+		t.Fatalf("row should still exist after refused dirty-wipe")
 	}
 }
 
 // TestTaskUnpublishWorkerForbidden: only supervisors may unpublish.
 func TestTaskUnpublishWorkerForbidden(t *testing.T) {
-	repoRoot := mustInitGitRepo(t)
-	s := newFixtureState()
-	mustRegisterFor(t, s, "sup", "supervisor", "myproject", repoRoot, 1)
+	s, _, _ := setupPublishedTask(t, "hi")
 	mustRegisterRole(t, s, "alice", "worker", 2)
 
-	pub := s.opTaskPublish(Request{Args: map[string]any{
-		"from": "sup", "project": "myproject", "repo_root": repoRoot,
-		"workstreams": []any{map[string]any{"slug": "feat-x", "branch": "feat/x", "brief": "hi"}},
-	}})
-	if !pub.OK {
-		t.Fatalf("publish: %+v", pub)
-	}
-
 	resp := s.opTaskUnpublish(Request{Args: map[string]any{
-		"from": "alice", "project": "myproject", "slug": "feat-x", "force": true,
+		"from": "alice", "project": "myproject", "slug": "feat-x",
+		"force": true, "wipe_worktree": true,
 	}})
 	if resp.OK {
 		t.Fatalf("worker must not be able to unpublish")
 	}
 	if resp.Code != CodeUnauthorized {
 		t.Fatalf("expected unauthorized, got code=%d", resp.Code)
+	}
+}
+
+// TestRepublishClearsArchivedFlag: publish → unpublish → republish of
+// the same slug un-archives the room so new posts go through.
+func TestRepublishClearsArchivedFlag(t *testing.T) {
+	s, repoRoot, _ := setupPublishedTask(t, "first")
+
+	// Unpublish.
+	up := s.opTaskUnpublish(Request{Args: map[string]any{
+		"from": "sup", "project": "myproject", "slug": "feat-x",
+	}})
+	if !up.OK {
+		t.Fatalf("unpublish: %+v", up)
+	}
+	s.mu.Lock()
+	r := s.rooms["feat-x"]
+	s.mu.Unlock()
+	r.mu.Lock()
+	archivedAfterUnpublish := r.Archived
+	r.mu.Unlock()
+	if !archivedAfterUnpublish {
+		t.Fatalf("room should be archived after unpublish")
+	}
+
+	// Republish same slug.
+	pub := s.opTaskPublish(Request{Args: map[string]any{
+		"from": "sup", "project": "myproject", "repo_root": repoRoot,
+		"workstreams": []any{map[string]any{"slug": "feat-x", "branch": "feat/x", "brief": "second try"}},
+	}})
+	if !pub.OK {
+		t.Fatalf("republish: %+v", pub)
+	}
+
+	r.mu.Lock()
+	archivedAfterRepublish := r.Archived
+	r.mu.Unlock()
+	if archivedAfterRepublish {
+		t.Fatalf("archived flag must be cleared on republish")
+	}
+
+	// Post works now.
+	post := s.opPost(Request{Args: map[string]any{
+		"from": "sup", "room": "feat-x", "body": "after republish",
+	}})
+	if !post.OK {
+		t.Fatalf("post to republished room should succeed: %+v", post)
+	}
+}
+
+// TestAgentsIncludesLeaseStatus: opAgents returns lease_status correctly
+// computed from ExpiresAt.
+func TestAgentsIncludesLeaseStatus(t *testing.T) {
+	s := newFixtureState()
+	mustRegisterRole(t, s, "alive", "worker", 1)
+	mustRegisterRole(t, s, "stale", "worker", 2)
+	// Force stale's lease into the past.
+	s.mu.Lock()
+	s.agentByName("stale").ExpiresAt = time.Now().Add(-time.Minute)
+	s.mu.Unlock()
+
+	resp := s.opAgents()
+	if !resp.OK {
+		t.Fatalf("opAgents: %+v", resp)
+	}
+	rows, _ := resp.Data.([]any)
+	found := map[string]string{}
+	for _, row := range rows {
+		m := row.(map[string]any)
+		name, _ := m["name"].(string)
+		status, _ := m["lease_status"].(string)
+		found[name] = status
+	}
+	if found["alive"] != "live" {
+		t.Fatalf("expected alive.lease_status=live, got %q", found["alive"])
+	}
+	if found["stale"] != "expired" {
+		t.Fatalf("expected stale.lease_status=expired, got %q", found["stale"])
 	}
 }
 
