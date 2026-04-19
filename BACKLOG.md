@@ -742,57 +742,38 @@ handlers.
 
 ### K. `loadRooms` transcript rehydration on boot
 
-**Source**: `kopos-feedback.md` (external), diagnosed during the
-2ed889f follow-up while investigating obolos-supervisor's
-"republish lost the original bundle" observation.
+**Status**: Shipped at `8752028` + `6e9780a`.
 
-**Goal**: Restore `r.log` and `r.seq` from on-disk message files
-when the daemon boots, so `kopos history <slug> --room` works
-after restarts and the "bundle preserved across
-unpublish/republish" claim holds beyond a single daemon lifetime.
+Three correlated fixes landed alongside the headline feature:
 
-**Problem**: `loadRooms` (registry.go:100-132) rehydrates a Room
-from SQLite — name, desc, createdBy, createdAt, archived, members
-— but does not touch `r.log` or `r.seq`. `internalPost` writes
-every message to `$KOPOS_WORKSPACE/rooms/<slug>/NNNNNN-<from>.md`
-via the write queue (git-committed), but nothing reads them back.
-Post-restart, `kopos rooms` shows `messages=0` for every room and
-`kopos history` returns empty. The transcript itself is intact on
-disk; just not in memory.
+1. **`parseRoomMsgFile` + `loadRooms` transcript walk** (room.go,
+   registry.go): walks `rooms/<slug>/*.md` on boot, parses
+   frontmatter, rebuilds `r.log` and `r.seq`. Malformed files
+   skipped, not fatal.
 
-**Scope**:
-- New helper `parseRoomMsgFile(path) (RoomMessage, error)` in
-  `room.go` alongside `renderRoomMsg`. Parses the fixed frontmatter
-  format (`---\nseq:...\nfrom:...\nroom:...\nts:...\n---\n\n<body>`).
-  Malformed files are skipped, not fatal.
-- Extend `loadRooms`: for each room rehydrated from SQLite,
-  `os.ReadDir(rooms/<slug>)`, sort by filename (zero-padded seq
-  ensures lex == seq order), parse each `.md`, append to `r.log`,
-  set `r.seq = max(seq)`.
-- No conflict with `replayMailbox` (state.go): `r.mailbox` is the
-  unread queue per recipient, separate from `r.log`. Both may
-  reference the same message; that's correct today for live
-  daemons too.
+2. **`ensureRoomWithMembers` SQLite persistence** (task.go): rooms
+   created by `task_publish` were never written to SQLite — only
+   to the async git write queue — so `loadRooms` found nothing
+   after restart. Fixed by calling `queue.roomUpsert` +
+   `queue.roomAddMember` on new rooms. Secondary bug: `newRoom()`
+   pre-populates `createdBy` in `r.members`, so the creator was
+   absent from `added`; fix flushes `r.members` directly for new
+   rooms.
 
-**Files**: `room.go` (parser), `registry.go` (extend `loadRooms`;
-add `sort`, `strings`, `strconv` imports).
+3. **`flushPendingWrites` boot ordering** (writer.go, state.go):
+   the write-queue replay goroutine started after `newState()`
+   returned, so transcript files not yet git-committed before
+   shutdown were absent from disk during `loadRooms`. Extracted
+   `flushPendingWrites()`, called synchronously in `newState()`
+   before `loadRooms`.
 
-**Tests**:
-- `TestLoadRoomsRehydratesLogAndSeq` — seed a fake workspace with
-  two message files + matching SQLite room row, boot, assert
-  `r.log` has 2 entries in seq order and `r.seq == 2`.
-- `TestLoadRoomsHandlesMissingTranscriptDir` — room row but no
-  `rooms/<slug>/` directory; boot must not error; empty log.
-- `TestLoadRoomsSkipsMalformedTranscriptFiles` — one good file,
-  one broken; only the good one lands.
-- Integration: `TestRepublishBundleSurvivesRestart` — publish, post
-  a follow-up, restart daemon, `kopos history <slug> --room` still
-  returns both messages.
-
-**Blockers**: None. Self-contained.
-
-**Agent fit**: Medium context. Bounded to rehydration; no protocol
-change, no cross-file refactor.
+Tests in `room_rehydration_test.go`:
+- `TestLoadRoomsRehydratesLogAndSeq`
+- `TestLoadRoomsHandlesMissingTranscriptDir`
+- `TestLoadRoomsSkipsMalformedTranscriptFiles`
+- `TestParseRoomMsgFileRoundTrip`
+- `TestEnsureRoomWithMembersPersistedToSQLite`
+- `TestRepublishBundleSurvivesRestart` (integration)
 
 ### L. `kopos rename <new>` — identity lifecycle primitive
 
