@@ -661,11 +661,25 @@ BACKLOG.md stays for rationale, rules of engagement, cold-start reading
 (dispatch + role-gated checks), `registry.go` (Role + RepoRoot on
 Agent), `client.go` (cmdTask), `main.go` (dispatch), `help.go`
 (document), `protocol.go` (new error codes `SupervisorBusy`,
-`ProjectIdentityMismatch`).
+`ProjectIdentityMismatch`), `prompts/{worker,supervisor}.md`,
+`completions/{_kopos,kopos.bash}`.
 
-**Status**: Shipped. The initial `plan_*` surface (with `plan assign`
-+ pre-registration kickoff delivery) was replaced by publish-pull in
-a follow-up pass; see the kopos workflow spec for motivation.
+**Status**: Shipped. Evolution:
+- `b809316` — publish-pull rewrite; initial `plan_*` surface
+  (with `plan assign` + pre-registration kickoff delivery) replaced
+  by publish-pull; adds `task unpublish` primitive.
+- `2ed889f` — unpublish safety follow-up: worktree preserved by
+  default, `--wipe-worktree` opt-in, `--evict-owner` required to
+  wipe over a live owner lease, accurate `worktree_removed` field
+  (now derived from real filesystem check), republish clears
+  archived flag, `kopos agents` grows a `lease` column, macOS
+  `/var`→`/private/var` symlink normalization in
+  `ensureWorktree`.
+
+Rolling external feedback against shipped versions lives in
+`/Users/neektza/Code/obolos/obolos/kopos-feedback.md` (obolos
+supervisor's notes). Outstanding items from that doc are tracked
+as separate workstreams below (K/L/M).
 
 ### S. `task spawn` — kopos as agent lifecycle bus (future)
 
@@ -725,6 +739,191 @@ collision with E (keychain).
 
 **Agent fit**: Deep context. Touches the edit surface of most
 handlers.
+
+### K. `loadRooms` transcript rehydration on boot
+
+**Source**: `kopos-feedback.md` (external), diagnosed during the
+2ed889f follow-up while investigating obolos-supervisor's
+"republish lost the original bundle" observation.
+
+**Goal**: Restore `r.log` and `r.seq` from on-disk message files
+when the daemon boots, so `kopos history <slug> --room` works
+after restarts and the "bundle preserved across
+unpublish/republish" claim holds beyond a single daemon lifetime.
+
+**Problem**: `loadRooms` (registry.go:100-132) rehydrates a Room
+from SQLite — name, desc, createdBy, createdAt, archived, members
+— but does not touch `r.log` or `r.seq`. `internalPost` writes
+every message to `$KOPOS_WORKSPACE/rooms/<slug>/NNNNNN-<from>.md`
+via the write queue (git-committed), but nothing reads them back.
+Post-restart, `kopos rooms` shows `messages=0` for every room and
+`kopos history` returns empty. The transcript itself is intact on
+disk; just not in memory.
+
+**Scope**:
+- New helper `parseRoomMsgFile(path) (RoomMessage, error)` in
+  `room.go` alongside `renderRoomMsg`. Parses the fixed frontmatter
+  format (`---\nseq:...\nfrom:...\nroom:...\nts:...\n---\n\n<body>`).
+  Malformed files are skipped, not fatal.
+- Extend `loadRooms`: for each room rehydrated from SQLite,
+  `os.ReadDir(rooms/<slug>)`, sort by filename (zero-padded seq
+  ensures lex == seq order), parse each `.md`, append to `r.log`,
+  set `r.seq = max(seq)`.
+- No conflict with `replayMailbox` (state.go): `r.mailbox` is the
+  unread queue per recipient, separate from `r.log`. Both may
+  reference the same message; that's correct today for live
+  daemons too.
+
+**Files**: `room.go` (parser), `registry.go` (extend `loadRooms`;
+add `sort`, `strings`, `strconv` imports).
+
+**Tests**:
+- `TestLoadRoomsRehydratesLogAndSeq` — seed a fake workspace with
+  two message files + matching SQLite room row, boot, assert
+  `r.log` has 2 entries in seq order and `r.seq == 2`.
+- `TestLoadRoomsHandlesMissingTranscriptDir` — room row but no
+  `rooms/<slug>/` directory; boot must not error; empty log.
+- `TestLoadRoomsSkipsMalformedTranscriptFiles` — one good file,
+  one broken; only the good one lands.
+- Integration: `TestRepublishBundleSurvivesRestart` — publish, post
+  a follow-up, restart daemon, `kopos history <slug> --room` still
+  returns both messages.
+
+**Blockers**: None. Self-contained.
+
+**Agent fit**: Medium context. Bounded to rehydration; no protocol
+change, no cross-file refactor.
+
+### L. `kopos rename <new>` — identity lifecycle primitive
+
+**Source**: `kopos-feedback.md` (external) — obolos-supervisor
+observed that renaming `supervisor` → `obolos-supervisor` required
+three out-of-band steps (register-new + task-handoff +
+unregister-old) and still fragmented channel history across two
+peer-pair keys.
+
+**Goal**: Single atomic `kopos rename <new>` that preserves
+`agent_id` + keypair and migrates every name-indexed surface so
+the audit trail stays coherent across a rename.
+
+**Problem**: Agent identity is keyed by name in too many places:
+- `Agent.Name`, `nameIdx[name]` in registry.
+- `Task.Owner`, `TaskList.Supervisor` in task lists.
+- `Room.members[name]` keys.
+- `Channel.PeerA` / `PeerB`, `channelKey(a, b)` for DM history.
+- Private key file `~/.kopos/keys/<name>.key`.
+- Nickname `Address` strings (`name@project:branch`).
+- `anyWaiter[name]`, `channel.waiter[name]` map keys.
+- SQLite mailbox rows keyed by `(owner_name, kind, target, seq)`.
+
+`register --name <new>` today just creates a fresh identity with a
+new keypair and ULID; nothing migrates.
+
+**Scope**:
+1. **Registry**: update `nameIdx`, preserve `agent_id` and pubkey,
+   rename key file via `renameKey(old, new)` (new keystore op).
+2. **Tasks**: walk `s.tasks[*]`; rewrite `Supervisor` + `Task.Owner`
+   fields matching the old name; persist.
+3. **Rooms**: walk `s.rooms[*]`; rewrite `members` map keys; persist
+   via `queue.roomRemoveMember` + `queue.roomAddMember`.
+4. **Channels**: walk `s.channels`; rewrite `PeerA`/`PeerB`;
+   re-key the map under the new `channelKey`. Rewrite
+   `mailbox`/`log`/`waiter` map keys where they reference the old
+   name.
+5. **SQLite mailbox**: new `queue.mailboxRename(old, new)` that
+   updates both `recipient` and `from_name` columns in the mailbox
+   table.
+6. **Nicknames**: rewrite `Address` strings matching
+   `<old>@...` to `<new>@...`.
+7. **Waiters**: migrate `anyWaiter[old]` → `anyWaiter[new]`;
+   in-flight blocking calls stay on their goroutines but their
+   next delivery targets the new key.
+8. **Safety**: refuse on collision with an existing name unless
+   `--force`. Verify caller holds the old name's key (signature
+   check applies like any authenticated op).
+9. **Atomicity**: hold `s.mu` for the duration; ensure partial
+   failure rolls back the structural changes (hard — the SQLite
+   update is the point of no return, so either do it last, or wrap
+   in a transaction and rollback in-memory on SQLite failure).
+
+**New op**: `rename` (args: `from`, `to`, optional `force`).
+**New CLI**: `kopos rename <new>`.
+**New error code**: `CodeNameConflict` (9).
+
+**Files**: `state.go` (new op + dispatch), `registry.go` (Agent
+rename helpers), `keystore.go` + `keystore_*.go` (key file rename),
+`task.go` (task-side migration), `room.go` (room-side migration),
+`channel.go` (channel-side migration), `nickname.go` (nickname
+rewrite), `queue.go` (`mailboxRename`), `client.go` (`cmdRename`),
+`main.go` (dispatch), `help.go` (doc), `protocol.go`
+(`CodeNameConflict`), `prompts/*.md` (note the new primitive,
+replace any "drop and re-register" guidance).
+
+**Tests**: round-trip rename preserves agent_id + keypair; task
+ownership moves; room membership moves; channel DM history is
+accessible under the new name; SQLite mailbox rows carry over;
+nickname references are rewritten; collision refused without
+`--force`; wrong-key caller rejected; rollback on SQLite failure.
+
+**Blockers**: Depends on workstream M (re-register semantics)
+being decided, because the rename code needs to know whether it's
+conceptually "a live agent changing name" or "drop-and-restore"
+— affects behavior when the caller is also currently a member of
+channels/rooms with pending reads.
+
+**Agent fit**: Highest context. Touches every name-indexed surface.
+Not cold-start.
+
+### M. Re-register and room membership (design question)
+
+**Source**: `kopos-feedback.md` (external) — a worker followed the
+documented exit protocol (unregister after `ready`), then
+re-registered to look at review, and had to `kopos join <slug>`
+manually because unregister had dropped it from the room.
+
+**Goal**: Pick a consistent answer to "what does re-register under
+an existing name mean for prior room memberships / channel
+subscriptions" and update the worker/supervisor prompts to match.
+
+**The two stances**:
+- **Re-register = resume**. Unregister drops the agent but
+  preserves its room memberships on disk under a "paused" marker;
+  re-register rehydrates them. Matches chat-client expectations.
+- **Re-register = fresh identity event**. Unregister is fully
+  terminal; re-register is explicit arrival; rejoining is opt-in.
+  Matches the rest of kopos's explicit-state posture.
+
+**Recommendation**: Fresh-identity. Unregister currently deletes
+the private key on disk (state.go:558 — `_ = removeKey(from)`);
+if re-register were resume, that key deletion would need to go
+because the same keypair is expected to be usable afterwards.
+Fresh-identity preserves the cleanest story: unregister is
+irrevocable, re-register creates a new agent_id that happens to
+share a name. Any "I want to come back and read" flow uses
+`kopos rename` (workstream L) to change name without losing
+state, not unregister/re-register.
+
+**Scope**:
+- Decide the stance.
+- Update `prompts/worker.md` exit-protocol section to spell it
+  out explicitly.
+- Update `prompts/supervisor.md` similarly for the supervisor
+  lifecycle.
+- Update `kopos protocol` / `help.go` identity section if needed.
+
+**Files**: `prompts/worker.md`, `prompts/supervisor.md`, `help.go`.
+(No daemon code change under the recommended stance — it
+describes the existing behavior and brings the docs in line.)
+
+**Tests**: Prompt byte-equality across `init`/`prompt` already
+covered; add a test that the updated text mentions the chosen
+stance so future edits don't silently drift.
+
+**Blockers**: None, but blocks L (rename primitive) which wants
+this decided first so its own prompt updates can reference the
+consistent model.
+
+**Agent fit**: Low code, high care. Mostly prose.
 
 ## Sequencing after the current batch
 
