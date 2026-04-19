@@ -925,84 +925,114 @@ consistent model.
 
 **Agent fit**: Low code, high care. Mostly prose.
 
-### N. `kopos agents` — decomposed column view
+### N. `kopos agents` — decomposed columns + worktree-kind tracking
 
-**Source**: user feedback, this session — the `qualified` column
-(`name@project:branch`) is a single squashed string that humans
-can't scan visually. We already capture project / branch /
-worktree / harness / lease as separate fields on `Agent`; the
-table just doesn't surface them as independent columns.
+**Source**: user feedback, this session. Two parts of the same
+theme:
+- The `qualified` column (`name@project:branch`) is a single
+  squashed string that humans can't scan visually. The underlying
+  metadata is already on `Agent`; it just isn't surfaced as
+  independent columns.
+- "Topology" in the user's words: for each agent we want to know
+  whether its cwd is the main worktree of a repo, a secondary
+  worktree (branch worktree), or outside any repo. Today nothing
+  distinguishes these.
 
-**Goal**: Expand the default `kopos agents` tabular output so the
-components are separately scannable. Keep `qualified` (useful as
-a single address for scripting / copy-paste), add columns that
-already exist in the JSON response.
+**Goal**: Capture the missing "what kind of worktree is this
+agent in" metadata, and rework `kopos agents` so project /
+branch / worktree / worktree-kind / lease / role are separate
+columns. Keep `qualified` in the response for scripting use.
 
 **Scope**:
-- Client-side only. `opAgents` already includes `agent_id`,
-  `name`, `qualified`, `harness`, `pid`, `started_at`,
-  `last_seen_at`, `expires_at`, `lease_status`, `live` (see
-  state.go:820-847).
-- Add missing fields to the response: `project`, `branch`,
-  `worktree`, `role`, `cwd`. These live on `Agent` already.
-- Rework `cmdAgents` formatter (client.go:182-203) to print
+
+Metadata capture (identity.go + state.go):
+- `AgentInfo.MainRepoRoot` — absolute, symlink-normalized path of
+  the main worktree for the current repo. Derived from
+  `git rev-parse --git-common-dir` → parent dir → `canonicalPath`.
+  Stable across all worktrees of the same repo, unlike `RepoRoot`
+  which points at the current (possibly secondary) worktree.
+- `AgentInfo.WorktreeKind` ∈ `{"main", "secondary", "detached",
+  "outside"}`:
+    - `outside`: `git rev-parse` fails (not inside a git repo).
+    - `main`: `show-toplevel` == parent of `--git-common-dir`.
+    - `secondary`: `show-toplevel` != parent of
+      `--git-common-dir` (cwd is inside `.git/worktrees/<name>/`).
+    - `detached`: HEAD is detached (no branch ref).
+- Propagate both onto `Agent` and persist (registry write).
+- Include both plus existing `project` / `branch` / `worktree` /
+  `role` in the `opAgents` response (see state.go:820-847).
+
+**Handling "outside any repo" agents** (three variants):
+1. *Outside, no --project override*: `git rev-parse` fails; all
+   git-derived fields empty; `WorktreeKind = "outside"`. Drop
+   the current `basename(CWD)` fallback for `Project` in
+   identity.go — it creates meaningless collisions between
+   unrelated agents in different dirs. Let `Project` stay
+   empty when no git context exists.
+2. *Outside, --project X explicit*: user forces association.
+   `Project = X`, `WorktreeKind = "outside"`, git fields empty.
+   Agent can participate in rooms and peer messaging for that
+   project but cannot claim/publish tasks (no worktree).
+3. *Inside a repo with no remote*: existing fallback behavior
+   (Project = repo basename); `WorktreeKind` set normally.
+
+Behavior impact:
+- Peer messaging (`tell`/`ask`/`read`/`read-any`) works
+  regardless of repo state.
+- Task ops need `Project`; variant 1 agents simply won't appear
+  in any project's bulletin and their `task claim` / `task
+  status` calls fail with `missing_project`. That's correct.
+- `kopos task claim` for variant 2 agents would fail during the
+  worktree path check — task rows carry a `Worktree` field; no
+  code change needed here, just doc clarity.
+- Table display: render empty repo/branch/worktree as `—`;
+  `wt-kind` column shows `outside` explicitly so it is obvious
+  this agent isn't tied to any repo.
+
+Table surface (client.go):
+- Rework `cmdAgents` formatter (client.go:182-203) to render
   columns like:
 
-        name            role         project   branch            worktree   lease    harness      last_seen
-        alice           worker       obolos    feat/bb-core      bb-core    live     codex        16:40
-        supervisor      supervisor   obolos    master            .          live     claude-code  15:00
-        kopos-maintainer supervisor  kopos     main              .          live     claude-code  16:37
+        name              role        project  branch        wt-kind    lease    harness
+        supervisor        supervisor  obolos   master        main       live     claude-code
+        codex             worker      obolos   feat/bb-core  secondary  live     codex
+        kopos-maintainer  supervisor  kopos    main          main       live     claude-code
 
-  Exact column set tbd during implementation — trimming to fit
-  typical terminal width matters. Maybe drop `agent_id` from the
-  default view (it's long ULID; keep behind `--wide`).
-- Add `--wide` flag that includes `agent_id`, `cwd`, `expires_at`.
-- Add `--json` flag for machine-readable output (pass-through of
-  the response).
+  Exact column set tbd during implementation; trim to typical
+  terminal width. Drop `agent_id` from the default view (long
+  ULID); keep behind `--wide`.
+- `--wide` flag: include `agent_id`, `cwd`, `expires_at`,
+  `main_repo_root`.
+- `--json` flag: pass-through of the raw response for scripting.
 
-**Files**: `state.go` (opAgents response fields), `client.go`
-(cmdAgents formatter, parseFlag use for --wide/--json).
+**Files**: `identity.go` (new detection helpers), `state.go`
+(AgentInfo → Agent propagation, opAgents response fields),
+`client.go` (cmdAgents formatter, --wide / --json flags).
 
 **Tests**:
-- Response-shape test asserting the new fields are present and
-  correctly populated for a fixture agent.
-- Keep existing `TestAgentsIncludesLeaseStatus` pattern.
+- `TestDetectWorktreeKindMain` / `...Secondary` / `...Outside` /
+  `...Detached` — seed a git repo + a secondary worktree in a
+  tempdir, assert detection from each cwd.
+- `TestAgentsResponseHasTopologyFields` — register agents from
+  each kind of cwd; assert response fields populate correctly.
+- Keep existing `TestAgentsIncludesLeaseStatus` shape.
 
-**Blockers**: None. Pure surface change, no protocol break.
+**Blockers**: None. No protocol break; only additive fields on
+the existing `opAgents` response.
 
-**Agent fit**: Small/self-contained.
+**Agent fit**: Small to medium. Identity detection has a few git
+edge cases (detached HEAD, bare repos) that need test coverage;
+the rest is straightforward formatter work.
 
-### O. Agent topology view
+### O. `kopos topology` — grouped view (optional polish on N)
 
-**Source**: user feedback, this session — beyond "list agents",
-we want to see the cluster structure: which agents are in the
-same repo, which are in the main worktree vs a secondary worktree,
-and which are entirely outside any tracked repo.
+**Source**: my own embellishment of N's underlying metadata. Not
+needed for the user's stated goal (which is covered by N adding
+the wt-kind column). Keep as a nice-to-have that uses the same
+data to render a cluster view.
 
-**Goal**: A grouped view of registered agents by repo + worktree
-kind, so the user can see at a glance that e.g. four agents are
-working on `obolos` across three worktrees and one unrelated
-agent is on `kopos`.
-
-**Scope**:
-- **Identity metadata extension** (identity.go):
-  - `AgentInfo.MainRepoRoot` — absolute path of the main worktree
-    of the current repo, derived from `git rev-parse
-    --git-common-dir` (parent dir, abs, symlink-normalized via
-    `canonicalPath`). Stable across all worktrees of the same
-    repo, unlike `RepoRoot` which is the current worktree's top.
-  - `AgentInfo.WorktreeKind` ∈ `{"main", "secondary", "detached",
-    "outside"}`:
-      - `outside`: not inside a git repo (`git rev-parse` fails).
-      - `main`: `show-toplevel` == parent of `--git-common-dir`.
-      - `secondary`: `show-toplevel` != parent of
-        `--git-common-dir` (i.e., inside `.git/worktrees/<name>/`).
-      - `detached`: branch resolves to `HEAD` (no ref).
-- **Agent struct** (state.go): add `MainRepoRoot` + `WorktreeKind`
-  fields. Persist. Include in `opAgents` response.
-- **Client** (client.go):
-  - New `kopos topology` subcommand (or `kopos agents
-    --topology`). Prints grouped output:
+**Goal**: A grouped presentation of the `agents` data that makes
+clusters of agents-working-on-the-same-repo obvious at a glance:
 
         repo: /Users/neektza/Code/obolos (obolos)
           main:       supervisor        master        live
@@ -1011,34 +1041,27 @@ agent is on `kopos`.
         repo: /Users/neektza/Code/kopos (kopos)
           main:       kopos-maintainer  main          live
         outside:
-          (none)
+          orphan-tool  (cwd: /tmp/scratch)  live
+          analysis     (--project=obolos, no worktree)
 
-  - Sort repos by agent count desc, agents within a repo by
-    worktree-kind (main first, then secondary alphabetical).
+**Scope**: Pure client-side formatter over N's response; sort
+repos by agent count desc, agents within each repo by kind (main
+first, then secondary alphabetical). `outside` bucket at the
+bottom lists agents with `WorktreeKind=outside`, showing cwd (and
+project if explicitly set). Either a `kopos topology` subcommand
+or `kopos agents --topology` flag.
 
-**Files**: `identity.go` (new detection), `state.go` (new fields,
-opAgents response, opRegister propagation), `client.go` (cmdTopology
-or --topology flag), `help.go` (doc), `completions/*` (new verb),
-`prompts/supervisor.md` (mention as a check-before-destructive-
-action tool, alongside `kopos agents` lease column).
+**Files**: `client.go` (new formatter), `help.go` (doc),
+`completions/*` (new verb or flag).
 
-**Tests**:
-- `TestDetectWorktreeKindMain` / `...Secondary` / `...Outside` —
-  in a seeded git repo + worktree, verify detection.
-- `TestAgentsIncludesTopologyFields` — response has MainRepoRoot
-  and WorktreeKind populated.
-- `TestTopologyGroupsAgentsByRepo` — integration-style: register
-  several agents from fixture cwds, call the topology op, assert
-  the grouping.
+**Tests**: `TestTopologyGroupsAgentsByRepo` — integration-style
+over fixture data.
 
-**Depends on**: N (decomposed columns). The topology view reuses
-the same metadata; landing N first de-risks O's formatter work.
+**Depends on**: N (all the grouping data lives there). Can be
+punted indefinitely; N alone covers the user's "I want to know
+if an agent is on main vs a worktree branch" need.
 
-**Blockers**: None besides the N → O sequencing.
-
-**Agent fit**: Medium. Identity detection is fiddly (git has many
-edge cases around submodules / detached HEAD / bare repos);
-allocate extra test time.
+**Agent fit**: Trivial once N is in.
 
 ## Sequencing after the current batch
 
