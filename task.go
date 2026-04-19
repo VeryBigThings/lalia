@@ -245,10 +245,33 @@ func (s *State) ensureRoomWithMembers(slug, createdBy string, members []string) 
 	s.mu.Unlock()
 
 	r.mu.Lock()
+	var added []string
 	for _, m := range members {
-		r.members[m] = true
+		if !r.members[m] {
+			r.members[m] = true
+			added = append(added, m)
+		}
 	}
+	createdAt := r.CreatedAt
 	r.mu.Unlock()
+
+	if s.queue != nil {
+		if !ok {
+			// New room: persist the row and ALL initial members.
+			// newRoom() pre-populates createdBy in r.members, so the creator
+			// would be absent from `added` — flush r.members directly.
+			_ = s.queue.roomUpsert(slug, "", createdBy, createdAt)
+			r.mu.Lock()
+			for m := range r.members {
+				_ = s.queue.roomAddMember(slug, m)
+			}
+			r.mu.Unlock()
+		} else {
+			for _, m := range added {
+				_ = s.queue.roomAddMember(slug, m)
+			}
+		}
+	}
 	return r
 }
 

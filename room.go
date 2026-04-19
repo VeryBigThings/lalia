@@ -2,7 +2,9 @@ package main
 
 import (
 	"fmt"
+	"os"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -548,6 +550,58 @@ func renderRoomMsg(m RoomMessage) []byte {
 		"---\nseq: %d\nfrom: %s\nroom: %s\nts: %s\n---\n\n%s",
 		m.Seq, m.From, m.Room, m.TS.Format(time.RFC3339), body,
 	))
+}
+
+// parseRoomMsgFile parses a room transcript file written by renderRoomMsg.
+// Returns an error for any malformed file; callers skip errored files.
+func parseRoomMsgFile(path string) (RoomMessage, error) {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return RoomMessage{}, err
+	}
+	s := string(b)
+	if !strings.HasPrefix(s, "---\n") {
+		return RoomMessage{}, fmt.Errorf("no frontmatter")
+	}
+	rest := s[4:]
+	end := strings.Index(rest, "\n---\n")
+	if end < 0 {
+		return RoomMessage{}, fmt.Errorf("frontmatter not closed")
+	}
+	header := rest[:end]
+	body := strings.TrimPrefix(rest[end+5:], "\n")
+	body = strings.TrimRight(body, "\n")
+
+	var msg RoomMessage
+	for _, line := range strings.Split(header, "\n") {
+		k, v, ok := strings.Cut(line, ": ")
+		if !ok {
+			continue
+		}
+		switch k {
+		case "seq":
+			n, err := strconv.Atoi(v)
+			if err != nil {
+				return RoomMessage{}, fmt.Errorf("bad seq: %w", err)
+			}
+			msg.Seq = n
+		case "from":
+			msg.From = v
+		case "room":
+			msg.Room = v
+		case "ts":
+			t, err := time.Parse(time.RFC3339, v)
+			if err != nil {
+				return RoomMessage{}, fmt.Errorf("bad ts: %w", err)
+			}
+			msg.TS = t
+		}
+	}
+	if msg.Seq == 0 || msg.From == "" || msg.Room == "" {
+		return RoomMessage{}, fmt.Errorf("incomplete frontmatter")
+	}
+	msg.Body = body
+	return msg, nil
 }
 
 func safePathSegment(name string) string {

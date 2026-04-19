@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
+	"strings"
 	"time"
 )
 
@@ -125,6 +127,34 @@ func (s *State) loadRooms() error {
 		for _, m := range members[rec.name] {
 			r.members[m] = true
 		}
+
+		// Rehydrate r.log and r.seq from on-disk transcript files.
+		roomDir := filepath.Join(workspacePath(), "rooms", rec.name)
+		if entries, err := os.ReadDir(roomDir); err == nil {
+			var msgFiles []string
+			for _, e := range entries {
+				name := e.Name()
+				if e.IsDir() || !strings.HasSuffix(name, ".md") {
+					continue
+				}
+				if name == "ROOM.md" || name == "MEMBERS.md" {
+					continue
+				}
+				msgFiles = append(msgFiles, filepath.Join(roomDir, name))
+			}
+			sort.Strings(msgFiles)
+			for _, fpath := range msgFiles {
+				msg, err := parseRoomMsgFile(fpath)
+				if err != nil {
+					continue
+				}
+				r.log = append(r.log, msg)
+				if msg.Seq > r.seq {
+					r.seq = msg.Seq
+				}
+			}
+		}
+
 		s.mu.Lock()
 		s.rooms[rec.name] = r
 		s.mu.Unlock()

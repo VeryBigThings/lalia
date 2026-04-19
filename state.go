@@ -80,6 +80,9 @@ func newState() (*State, error) {
 		return nil, fmt.Errorf("write queue: %w", err)
 	}
 	s.queue = q
+	// Flush any writes that were durably queued but not committed before the
+	// last shutdown. Must run before loadRooms so transcript files are on disk.
+	s.flushPendingWrites()
 	if err := s.loadRegistry(); err != nil {
 		return nil, err
 	}

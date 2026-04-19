@@ -64,6 +64,34 @@ func (s *State) enqueueWrite(relPath string, content []byte, commitMsg string) {
 	s.writes <- op
 }
 
+// flushPendingWrites synchronously commits any write-queue entries that were
+// durably inserted before the last shutdown but never committed to git.
+// Called during newState() before loadRooms so transcript files are on disk.
+func (s *State) flushPendingWrites() {
+	if s.queue == nil {
+		return
+	}
+	rows, err := s.queue.pending()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "queue flush:", err)
+		return
+	}
+	if len(rows) == 0 {
+		return
+	}
+	ws := workspacePath()
+	fmt.Fprintf(os.Stderr, "flushing %d pending queue entries before boot\n", len(rows))
+	for _, r := range rows {
+		s.commitWrite(ws, writeOp{
+			queueID:   r.id,
+			attempts:  r.attempts,
+			relPath:   r.relPath,
+			content:   r.content,
+			commitMsg: r.commitMsg,
+		})
+	}
+}
+
 func (s *State) runWriter() {
 	s.wg.Add(1)
 	defer func() {
@@ -75,30 +103,8 @@ func (s *State) runWriter() {
 		s.wg.Done()
 	}()
 
-	ws := workspacePath()
-
-	// Replay any entries that survived a previous crash (inserted into the
-	// queue but never committed to git and deleted).
-	if s.queue != nil {
-		rows, err := s.queue.pending()
-		if err != nil {
-			fmt.Fprintln(os.Stderr, "queue replay:", err)
-		} else if len(rows) > 0 {
-			fmt.Fprintf(os.Stderr, "replaying %d pending queue entries\n", len(rows))
-			for _, r := range rows {
-				s.commitWrite(ws, writeOp{
-					queueID:   r.id,
-					attempts:  r.attempts,
-					relPath:   r.relPath,
-					content:   r.content,
-					commitMsg: r.commitMsg,
-				})
-			}
-		}
-	}
-
 	for op := range s.writes {
-		s.commitWrite(ws, op)
+		s.commitWrite(workspacePath(), op)
 	}
 }
 
