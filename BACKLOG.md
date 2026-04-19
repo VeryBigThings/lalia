@@ -1029,21 +1029,29 @@ Key surface changes:
   `--wide`.
 
 Flags:
-- `--flat` — keep the old flat table (one row per agent, with
-  explicit `project` + `wt-kind` columns) for scripts and for
-  cases where you really do want a position-stable column grid:
+- `--grouped` — explicit request for the grouped-by-repo tree
+  view shown above. **This is the default**; the flag exists so
+  invocations can be explicit, and so the default is easy to flip
+  later by swapping which flag is default without reworking the
+  command surface.
+- `--flat` — flat table (one row per agent, explicit `project` +
+  `wt-kind` columns) for scripts and for cases where you really
+  do want a position-stable column grid:
 
         name              role        project  branch        wt-kind    lease    harness      last_seen
         supervisor        supervisor  obolos   master        main       live     claude-code  3s ago
         codex             worker      obolos   feat/bb-core  secondary  live     codex        42s ago
 
+  `--grouped` and `--flat` are mutually exclusive; passing both
+  errors out.
 - `--wide` — in either layout, include `agent_id`, `cwd`,
   `expires_at`, `main_repo_root`, `started_at` (for the cases
   where original register time still matters).
 - `--json` — pass-through of the raw response. The JSON retains
   both `started_at` and `last_seen_at` as full RFC3339
   timestamps; the relative-duration formatting is strictly a
-  human-display concern.
+  human-display concern. `--json` ignores `--grouped`/`--flat`
+  (they are display-only concerns).
 
 Collapses workstream O (grouped topology view) into N — no
 separate `kopos topology` verb needed.
