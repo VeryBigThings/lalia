@@ -989,35 +989,64 @@ Behavior impact:
   `wt-kind` column shows `outside` explicitly so it is obvious
   this agent isn't tied to any repo.
 
-Table surface (client.go):
-- Rework `cmdAgents` formatter (client.go:182-203) to render
-  columns like:
+Display surface (client.go):
+
+Default `kopos agents` output becomes a **grouped view by repo**
+— the primary question the command answers is "which agents are
+clustered together?" and the grouped layout shows that
+structurally instead of making the user mentally sort by project.
+The `main:` / `worktree:` line labels replace the `wt-kind`
+column from the flat design.
+
+Example:
+
+        repo: /Users/neektza/Code/obolos (obolos)
+          main:       supervisor        master         live     claude-code  3s ago
+          worktree:   codex             feat/bb-core   live     codex        42s ago  (wt/bb-core)
+          worktree:   sonnet            feat/shell-b   live     claude-code  7m ago   (wt/shell-budgetbot)
+        repo: /Users/neektza/Code/kopos (kopos)
+          main:       kopos-maintainer  main           live     claude-code  just now
+        outside:
+          orphan-tool     (cwd: /tmp/scratch)           live     claude-code  1m ago
+          analysis        (--project=obolos, no wt)    live     codex        5m ago
+
+Key surface changes:
+- The default view shows **last activity** (from
+  `Agent.LastSeenAt`, renewed by `renewLease` on every
+  authenticated request) instead of `started_at`. "When did this
+  agent last talk to kopos?" is more actionable than "when did
+  it first register," and lines up with the lease/liveness story
+  from the feedback-doc fix.
+- `last_seen` rendered as a relative duration (`just now`, `42s
+  ago`, `3m ago`, `1h ago`). For ages > 24h, fall back to the
+  date.
+- `wt-kind` column is gone in the grouped view — the tree
+  structure carries it (`main:` vs `worktree:` labels; `outside:`
+  bucket at the bottom).
+- Repos sorted by agent count desc; within a repo, main first
+  then secondary worktrees alphabetical.
+- `agent_id` not shown in default view (long ULID); keep behind
+  `--wide`.
+
+Flags:
+- `--flat` — keep the old flat table (one row per agent, with
+  explicit `project` + `wt-kind` columns) for scripts and for
+  cases where you really do want a position-stable column grid:
 
         name              role        project  branch        wt-kind    lease    harness      last_seen
         supervisor        supervisor  obolos   master        main       live     claude-code  3s ago
         codex             worker      obolos   feat/bb-core  secondary  live     codex        42s ago
-        kopos-maintainer  supervisor  kopos    main          main       live     claude-code  just now
 
-  Key surface change: the default view shows **last activity**
-  (from `Agent.LastSeenAt`, renewed by `renewLease` on every
-  authenticated request) instead of `started_at`. "When did this
-  agent last talk to kopos?" is more actionable for the
-  supervisor than "when did it first register," and lines up with
-  the lease/liveness story from the feedback-doc fix.
+- `--wide` — in either layout, include `agent_id`, `cwd`,
+  `expires_at`, `main_repo_root`, `started_at` (for the cases
+  where original register time still matters).
+- `--json` — pass-through of the raw response. The JSON retains
+  both `started_at` and `last_seen_at` as full RFC3339
+  timestamps; the relative-duration formatting is strictly a
+  human-display concern.
 
-  Exact column set tbd during implementation; trim to typical
-  terminal width. Drop `agent_id` from the default view (long
-  ULID); keep behind `--wide`.
-- Render `last_seen` as a relative duration (`just now`, `42s
-  ago`, `3m ago`, `1h ago`) since absolute timestamps are hard to
-  scan. For ages > 24h, fall back to the date.
-- `--wide` flag: include `agent_id`, `cwd`, `expires_at`,
-  `main_repo_root`, `started_at` (for the cases where the
-  original register time still matters).
-- `--json` flag: pass-through of the raw response for scripting.
-  The JSON retains both `started_at` and `last_seen_at` as full
-  RFC3339 timestamps; the relative-duration formatting is
-  strictly a human-display concern.
+Collapses workstream O (grouped topology view) into N — no
+separate `kopos topology` verb needed.
 
 **Files**: `identity.go` (new detection helpers), `state.go`
 (AgentInfo → Agent propagation, opAgents response fields),
@@ -1037,45 +1066,6 @@ the existing `opAgents` response.
 **Agent fit**: Small to medium. Identity detection has a few git
 edge cases (detached HEAD, bare repos) that need test coverage;
 the rest is straightforward formatter work.
-
-### O. `kopos topology` — grouped view (optional polish on N)
-
-**Source**: my own embellishment of N's underlying metadata. Not
-needed for the user's stated goal (which is covered by N adding
-the wt-kind column). Keep as a nice-to-have that uses the same
-data to render a cluster view.
-
-**Goal**: A grouped presentation of the `agents` data that makes
-clusters of agents-working-on-the-same-repo obvious at a glance:
-
-        repo: /Users/neektza/Code/obolos (obolos)
-          main:       supervisor        master        live
-          worktree:   codex             feat/bb-core  live    (wt/bb-core)
-          worktree:   sonnet            feat/shell-b  live    (wt/shell-budgetbot)
-        repo: /Users/neektza/Code/kopos (kopos)
-          main:       kopos-maintainer  main          live
-        outside:
-          orphan-tool  (cwd: /tmp/scratch)  live
-          analysis     (--project=obolos, no worktree)
-
-**Scope**: Pure client-side formatter over N's response; sort
-repos by agent count desc, agents within each repo by kind (main
-first, then secondary alphabetical). `outside` bucket at the
-bottom lists agents with `WorktreeKind=outside`, showing cwd (and
-project if explicitly set). Either a `kopos topology` subcommand
-or `kopos agents --topology` flag.
-
-**Files**: `client.go` (new formatter), `help.go` (doc),
-`completions/*` (new verb or flag).
-
-**Tests**: `TestTopologyGroupsAgentsByRepo` — integration-style
-over fixture data.
-
-**Depends on**: N (all the grouping data lives there). Can be
-punted indefinitely; N alone covers the user's "I want to know
-if an agent is on main vs a worktree branch" need.
-
-**Agent fit**: Trivial once N is in.
 
 ## Sequencing after the current batch
 
