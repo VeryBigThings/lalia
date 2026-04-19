@@ -925,6 +925,121 @@ consistent model.
 
 **Agent fit**: Low code, high care. Mostly prose.
 
+### N. `kopos agents` — decomposed column view
+
+**Source**: user feedback, this session — the `qualified` column
+(`name@project:branch`) is a single squashed string that humans
+can't scan visually. We already capture project / branch /
+worktree / harness / lease as separate fields on `Agent`; the
+table just doesn't surface them as independent columns.
+
+**Goal**: Expand the default `kopos agents` tabular output so the
+components are separately scannable. Keep `qualified` (useful as
+a single address for scripting / copy-paste), add columns that
+already exist in the JSON response.
+
+**Scope**:
+- Client-side only. `opAgents` already includes `agent_id`,
+  `name`, `qualified`, `harness`, `pid`, `started_at`,
+  `last_seen_at`, `expires_at`, `lease_status`, `live` (see
+  state.go:820-847).
+- Add missing fields to the response: `project`, `branch`,
+  `worktree`, `role`, `cwd`. These live on `Agent` already.
+- Rework `cmdAgents` formatter (client.go:182-203) to print
+  columns like:
+
+        name            role         project   branch            worktree   lease    harness      last_seen
+        alice           worker       obolos    feat/bb-core      bb-core    live     codex        16:40
+        supervisor      supervisor   obolos    master            .          live     claude-code  15:00
+        kopos-maintainer supervisor  kopos     main              .          live     claude-code  16:37
+
+  Exact column set tbd during implementation — trimming to fit
+  typical terminal width matters. Maybe drop `agent_id` from the
+  default view (it's long ULID; keep behind `--wide`).
+- Add `--wide` flag that includes `agent_id`, `cwd`, `expires_at`.
+- Add `--json` flag for machine-readable output (pass-through of
+  the response).
+
+**Files**: `state.go` (opAgents response fields), `client.go`
+(cmdAgents formatter, parseFlag use for --wide/--json).
+
+**Tests**:
+- Response-shape test asserting the new fields are present and
+  correctly populated for a fixture agent.
+- Keep existing `TestAgentsIncludesLeaseStatus` pattern.
+
+**Blockers**: None. Pure surface change, no protocol break.
+
+**Agent fit**: Small/self-contained.
+
+### O. Agent topology view
+
+**Source**: user feedback, this session — beyond "list agents",
+we want to see the cluster structure: which agents are in the
+same repo, which are in the main worktree vs a secondary worktree,
+and which are entirely outside any tracked repo.
+
+**Goal**: A grouped view of registered agents by repo + worktree
+kind, so the user can see at a glance that e.g. four agents are
+working on `obolos` across three worktrees and one unrelated
+agent is on `kopos`.
+
+**Scope**:
+- **Identity metadata extension** (identity.go):
+  - `AgentInfo.MainRepoRoot` — absolute path of the main worktree
+    of the current repo, derived from `git rev-parse
+    --git-common-dir` (parent dir, abs, symlink-normalized via
+    `canonicalPath`). Stable across all worktrees of the same
+    repo, unlike `RepoRoot` which is the current worktree's top.
+  - `AgentInfo.WorktreeKind` ∈ `{"main", "secondary", "detached",
+    "outside"}`:
+      - `outside`: not inside a git repo (`git rev-parse` fails).
+      - `main`: `show-toplevel` == parent of `--git-common-dir`.
+      - `secondary`: `show-toplevel` != parent of
+        `--git-common-dir` (i.e., inside `.git/worktrees/<name>/`).
+      - `detached`: branch resolves to `HEAD` (no ref).
+- **Agent struct** (state.go): add `MainRepoRoot` + `WorktreeKind`
+  fields. Persist. Include in `opAgents` response.
+- **Client** (client.go):
+  - New `kopos topology` subcommand (or `kopos agents
+    --topology`). Prints grouped output:
+
+        repo: /Users/neektza/Code/obolos (obolos)
+          main:       supervisor        master        live
+          worktree:   codex             feat/bb-core  live    (wt/bb-core)
+          worktree:   sonnet            feat/shell-b  live    (wt/shell-budgetbot)
+        repo: /Users/neektza/Code/kopos (kopos)
+          main:       kopos-maintainer  main          live
+        outside:
+          (none)
+
+  - Sort repos by agent count desc, agents within a repo by
+    worktree-kind (main first, then secondary alphabetical).
+
+**Files**: `identity.go` (new detection), `state.go` (new fields,
+opAgents response, opRegister propagation), `client.go` (cmdTopology
+or --topology flag), `help.go` (doc), `completions/*` (new verb),
+`prompts/supervisor.md` (mention as a check-before-destructive-
+action tool, alongside `kopos agents` lease column).
+
+**Tests**:
+- `TestDetectWorktreeKindMain` / `...Secondary` / `...Outside` —
+  in a seeded git repo + worktree, verify detection.
+- `TestAgentsIncludesTopologyFields` — response has MainRepoRoot
+  and WorktreeKind populated.
+- `TestTopologyGroupsAgentsByRepo` — integration-style: register
+  several agents from fixture cwds, call the topology op, assert
+  the grouping.
+
+**Depends on**: N (decomposed columns). The topology view reuses
+the same metadata; landing N first de-risks O's formatter work.
+
+**Blockers**: None besides the N → O sequencing.
+
+**Agent fit**: Medium. Identity detection is fiddly (git has many
+edge cases around submodules / detached HEAD / bare repos);
+allocate extra test time.
+
 ## Sequencing after the current batch
 
 A, E, F merged. Three parallel workstreams open (I, H, J); worktrees,
