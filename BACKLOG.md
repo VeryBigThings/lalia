@@ -993,17 +993,31 @@ Table surface (client.go):
 - Rework `cmdAgents` formatter (client.go:182-203) to render
   columns like:
 
-        name              role        project  branch        wt-kind    lease    harness
-        supervisor        supervisor  obolos   master        main       live     claude-code
-        codex             worker      obolos   feat/bb-core  secondary  live     codex
-        kopos-maintainer  supervisor  kopos    main          main       live     claude-code
+        name              role        project  branch        wt-kind    lease    harness      last_seen
+        supervisor        supervisor  obolos   master        main       live     claude-code  3s ago
+        codex             worker      obolos   feat/bb-core  secondary  live     codex        42s ago
+        kopos-maintainer  supervisor  kopos    main          main       live     claude-code  just now
+
+  Key surface change: the default view shows **last activity**
+  (from `Agent.LastSeenAt`, renewed by `renewLease` on every
+  authenticated request) instead of `started_at`. "When did this
+  agent last talk to kopos?" is more actionable for the
+  supervisor than "when did it first register," and lines up with
+  the lease/liveness story from the feedback-doc fix.
 
   Exact column set tbd during implementation; trim to typical
   terminal width. Drop `agent_id` from the default view (long
   ULID); keep behind `--wide`.
+- Render `last_seen` as a relative duration (`just now`, `42s
+  ago`, `3m ago`, `1h ago`) since absolute timestamps are hard to
+  scan. For ages > 24h, fall back to the date.
 - `--wide` flag: include `agent_id`, `cwd`, `expires_at`,
-  `main_repo_root`.
+  `main_repo_root`, `started_at` (for the cases where the
+  original register time still matters).
 - `--json` flag: pass-through of the raw response for scripting.
+  The JSON retains both `started_at` and `last_seen_at` as full
+  RFC3339 timestamps; the relative-duration formatting is
+  strictly a human-display concern.
 
 **Files**: `identity.go` (new detection helpers), `state.go`
 (AgentInfo → Agent propagation, opAgents response fields),
