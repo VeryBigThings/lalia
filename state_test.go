@@ -2,6 +2,7 @@ package main
 
 import (
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 )
@@ -12,7 +13,8 @@ func newFixtureState() *State {
 		nameIdx:   make(map[string]string),
 		channels:  make(map[string]*Channel),
 		rooms:     make(map[string]*Room),
-		plans:     make(map[string]*Plan),
+		tasks:     make(map[string]*TaskList),
+		repoLocks: make(map[string]*sync.Mutex),
 		anyWaiter: make(map[string]chan anyMsg),
 		writes:    make(chan writeOp, 128),
 		stop:      make(chan struct{}),

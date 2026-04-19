@@ -46,7 +46,7 @@ _kopos() {
                 'read-any:block until any channel or room delivers'
                 'channels:list your peer channels'
                 'history:transcript for a peer or room'
-                'plan:plan subcommands (supervisor/worker roles)'
+                'task:task subcommands (publish, claim, bulletin, …)'
                 'renew:extend caller lease'
                 'stop:shut down the daemon'
                 'protocol:print agent-facing protocol guide'
@@ -59,7 +59,7 @@ _kopos() {
             case "$words[1]" in
                 rooms)
                     local -a subs
-                    subs=('gc:archive merged-assignment rooms in plans you supervise')
+                    subs=('gc:archive merged-task rooms in lists you supervise')
                     _describe -t subs 'rooms subcommand' subs
                     ;;
                 room)
@@ -124,27 +124,20 @@ _kopos() {
                         '--since[seq]:seq:' \
                         '--limit[N]:N:'
                     ;;
-                plan)
+                task)
                     _arguments -C \
-                        '1:subcommand:(create assign unassign status claim show list handoff)' \
-                        '*:: :->planargs'
+                        '1:subcommand:(publish bulletin claim status unassign reassign unpublish show list handoff)' \
+                        '*:: :->taskargs'
                     case "$state" in
-                        planargs)
+                        taskargs)
                             case "$words[1]" in
-                                assign)
+                                publish)
                                     _arguments \
-                                        '1:slug:' \
-                                        '2:agent:_kopos_agents' \
-                                        '--worktree[path]:path:_files -/' \
-                                        '--goal[text]:text:' \
-                                        '--kickoff[text]:text:' \
+                                        '--file[payload path or - for stdin]:path:_files' \
                                         '--project[id]:id:'
                                     ;;
-                                create)
-                                    _arguments \
-                                        '1:slug:' \
-                                        '--goal[text]:text:' \
-                                        '--project[id]:id:'
+                                bulletin)
+                                    _arguments '--project[id]:id:'
                                     ;;
                                 status)
                                     _arguments \
@@ -155,16 +148,30 @@ _kopos() {
                                 claim)
                                     _arguments \
                                         '1:slug:' \
-                                        '--worktree[path]:path:_files -/' \
+                                        '--project[id]:id:'
+                                    ;;
+                                reassign)
+                                    _arguments \
+                                        '1:slug:' \
+                                        '2:agent:_kopos_agents' \
                                         '--project[id]:id:'
                                     ;;
                                 unassign)
                                     _arguments '1:slug:' '--project[id]:id:'
                                     ;;
+                                unpublish)
+                                    _arguments \
+                                        '1:slug:' \
+                                        '--force[allow even if owned or room has traffic]' \
+                                        '--project[id]:id:'
+                                    ;;
                                 handoff)
                                     _arguments '1:new-supervisor:_kopos_agents' '--project[id]:id:'
                                     ;;
-                                show|list)
+                                show)
+                                    _arguments '1:slug:' '--project[id]:id:'
+                                    ;;
+                                list)
                                     _arguments '--project[id]:id:'
                                     ;;
                             esac

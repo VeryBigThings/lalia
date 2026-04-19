@@ -5,10 +5,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"os/exec"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 )
@@ -142,6 +144,9 @@ func cmdRegister(args []string) {
 	}
 	if info.RepoURL != "" {
 		reqArgs["repo_url"] = info.RepoURL
+	}
+	if info.RepoRoot != "" {
+		reqArgs["repo_root"] = info.RepoRoot
 	}
 	if info.Worktree != "" {
 		reqArgs["worktree"] = info.Worktree
@@ -484,17 +489,16 @@ func cmdHistory(args []string) {
 	})
 }
 
-// cmdPlan routes plan subcommands. The project is auto-detected from the
+// cmdTask routes task subcommands. The project is auto-detected from the
 // caller's git environment unless --project is specified explicitly.
-func cmdPlan(args []string) {
+func cmdTask(args []string) {
 	if len(args) < 1 {
-		fmt.Fprintln(os.Stderr, "usage: kopos plan <create|assign|unassign|status|claim|show|list|handoff>")
+		fmt.Fprintln(os.Stderr, "usage: kopos task <publish|bulletin|claim|status|unassign|reassign|unpublish|show|list|handoff>")
 		os.Exit(1)
 	}
 	sub := args[0]
 	rest := args[1:]
 
-	// Auto-detect project from CWD unless explicitly overridden.
 	info := DetectAgentInfo(AgentInfo{})
 	detectedProject := projectID(info.RepoURL, info.Project)
 
@@ -505,60 +509,103 @@ func cmdPlan(args []string) {
 	from := mustCaller(rest)
 
 	switch sub {
-	case "create":
-		if len(rest) < 1 || rest[0] == "" || rest[0][0] == '-' {
-			fmt.Fprintln(os.Stderr, "usage: kopos plan create <slug> [--goal <text>] [--project <id>]")
+	case "publish":
+		payloadPath := parseFlag(rest, "--file")
+		var raw []byte
+		var err error
+		if payloadPath == "" || payloadPath == "-" {
+			raw, err = io.ReadAll(os.Stdin)
+		} else {
+			raw, err = os.ReadFile(payloadPath)
+		}
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "read publish payload: %v\n", err)
 			os.Exit(1)
 		}
-		slug := rest[0]
-		goal := parseFlag(rest, "--goal")
-		resp, err := request("plan_create", map[string]any{
-			"from": from, "project": proj, "slug": slug, "goal": goal,
+		var payload map[string]any
+		if err := json.Unmarshal(raw, &payload); err != nil {
+			fmt.Fprintf(os.Stderr, "parse publish payload: %v\n", err)
+			os.Exit(1)
+		}
+		if payload["project"] == nil || payload["project"] == "" {
+			payload["project"] = proj
+		}
+		if payload["repo_root"] == nil || payload["repo_root"] == "" {
+			payload["repo_root"] = info.RepoRoot
+		}
+		payload["from"] = from
+		resp, err := request("task_publish", payload)
+		handle(resp, err, func(data any) {
+			m := data.(map[string]any)
+			fmt.Printf("project=%s repo_root=%s\n", m["project"], m["repo_root"])
+			if okRows, _ := m["ok"].([]any); len(okRows) > 0 {
+				fmt.Println("ok:")
+				for _, o := range okRows {
+					om := o.(map[string]any)
+					fmt.Printf("  slug=%s worktree=%v noop=%v created=%v\n", om["slug"], om["worktree"], om["noop"], om["created_worktree"])
+				}
+			}
+			if failedRows, _ := m["failed"].([]any); len(failedRows) > 0 {
+				fmt.Println("failed:")
+				for _, f := range failedRows {
+					fm := f.(map[string]any)
+					fmt.Printf("  slug=%s error=%s\n", fm["slug"], fm["error"])
+				}
+			}
+		})
+
+	case "bulletin":
+		resp, err := request("task_bulletin", map[string]any{
+			"from": from, "project": proj,
 		})
 		handle(resp, err, func(data any) {
 			m := data.(map[string]any)
-			fmt.Printf("created slug=%s project=%s status=%s\n", m["slug"], m["project"], m["status"])
+			rows, _ := m["tasks"].([]any)
+			if len(rows) == 0 {
+				fmt.Printf("no open tasks in project=%s\n", m["project"])
+				return
+			}
+			for _, row := range rows {
+				a := row.(map[string]any)
+				fmt.Printf("slug=%-24s branch=%-24s status=%s has_context=%v\n",
+					a["slug"], a["branch"], a["status"], a["has_context"])
+				if summary, _ := a["brief_summary"].(string); summary != "" {
+					fmt.Printf("  %s\n", summary)
+				}
+				if paths, _ := a["owned_paths"].([]any); len(paths) > 0 {
+					strs := make([]string, len(paths))
+					for i, p := range paths {
+						strs[i], _ = p.(string)
+					}
+					fmt.Printf("  owned: %s\n", strings.Join(strs, ", "))
+				}
+			}
 		})
 
-	case "assign":
-		if len(rest) < 2 {
-			fmt.Fprintln(os.Stderr, "usage: kopos plan assign <slug> <agent> --worktree <path> [--goal <text>] [--kickoff <text>] [--project <id>]")
-			os.Exit(1)
-		}
-		slug, owner := rest[0], rest[1]
-		worktree := parseFlag(rest, "--worktree")
-		goal := parseFlag(rest, "--goal")
-		kickoff := parseFlag(rest, "--kickoff")
-		resp, err := request("plan_assign", map[string]any{
-			"from": from, "project": proj, "slug": slug, "owner": owner,
-			"worktree": worktree, "goal": goal, "kickoff": kickoff,
-		})
-		handle(resp, err, func(data any) {
-			m := data.(map[string]any)
-			fmt.Printf("assigned slug=%s owner=%s status=%s\n", m["slug"], m["owner"], m["status"])
-		})
-
-	case "unassign":
+	case "claim":
 		if len(rest) < 1 || rest[0] == "" || rest[0][0] == '-' {
-			fmt.Fprintln(os.Stderr, "usage: kopos plan unassign <slug> [--project <id>]")
+			fmt.Fprintln(os.Stderr, "usage: kopos task claim <slug> [--project <id>]")
 			os.Exit(1)
 		}
 		slug := rest[0]
-		resp, err := request("plan_unassign", map[string]any{
+		resp, err := request("task_claim", map[string]any{
 			"from": from, "project": proj, "slug": slug,
 		})
 		handle(resp, err, func(data any) {
 			m := data.(map[string]any)
-			fmt.Printf("unassigned slug=%s status=%s\n", m["slug"], m["status"])
+			fmt.Printf("claimed slug=%s owner=%s status=%s worktree=%v\n", m["slug"], m["owner"], m["status"], m["worktree"])
+			if bundle, _ := m["bundle"].(map[string]any); bundle != nil {
+				fmt.Printf("---\n[%v %v] %v\n%v\n---\n", bundle["seq"], bundle["ts"], bundle["from"], bundle["body"])
+			}
 		})
 
 	case "status":
 		if len(rest) < 2 {
-			fmt.Fprintln(os.Stderr, "usage: kopos plan status <slug> <in-progress|ready|blocked|merged> [--project <id>]")
+			fmt.Fprintln(os.Stderr, "usage: kopos task status <slug> <in-progress|ready|blocked|merged> [--project <id>]")
 			os.Exit(1)
 		}
 		slug, status := rest[0], rest[1]
-		resp, err := request("plan_status", map[string]any{
+		resp, err := request("task_status", map[string]any{
 			"from": from, "project": proj, "slug": slug, "status": status,
 		})
 		handle(resp, err, func(data any) {
@@ -566,32 +613,70 @@ func cmdPlan(args []string) {
 			fmt.Printf("slug=%s status=%s\n", m["slug"], m["status"])
 		})
 
-	case "claim":
+	case "unassign":
 		if len(rest) < 1 || rest[0] == "" || rest[0][0] == '-' {
-			fmt.Fprintln(os.Stderr, "usage: kopos plan claim <slug> [--worktree <path>] [--project <id>]")
+			fmt.Fprintln(os.Stderr, "usage: kopos task unassign <slug> [--project <id>]")
 			os.Exit(1)
 		}
 		slug := rest[0]
-		worktree := parseFlag(rest, "--worktree")
-		if worktree == "" {
-			worktree, _ = os.Getwd()
-		}
-		resp, err := request("plan_claim", map[string]any{
-			"from": from, "project": proj, "slug": slug, "worktree": worktree,
+		resp, err := request("task_unassign", map[string]any{
+			"from": from, "project": proj, "slug": slug,
 		})
 		handle(resp, err, func(data any) {
 			m := data.(map[string]any)
-			fmt.Printf("claimed slug=%s owner=%s status=%s\n", m["slug"], m["owner"], m["status"])
+			fmt.Printf("unassigned slug=%s status=%s\n", m["slug"], m["status"])
+		})
+
+	case "reassign":
+		if len(rest) < 2 {
+			fmt.Fprintln(os.Stderr, "usage: kopos task reassign <slug> <agent> [--project <id>]")
+			os.Exit(1)
+		}
+		slug, owner := rest[0], rest[1]
+		resp, err := request("task_reassign", map[string]any{
+			"from": from, "project": proj, "slug": slug, "owner": owner,
+		})
+		handle(resp, err, func(data any) {
+			m := data.(map[string]any)
+			fmt.Printf("reassigned slug=%s owner=%s status=%s\n", m["slug"], m["owner"], m["status"])
+		})
+
+	case "unpublish":
+		if len(rest) < 1 || rest[0] == "" || rest[0][0] == '-' {
+			fmt.Fprintln(os.Stderr, "usage: kopos task unpublish <slug> [--force] [--project <id>]")
+			os.Exit(1)
+		}
+		slug := rest[0]
+		force := parseBoolFlag(rest, "--force")
+		resp, err := request("task_unpublish", map[string]any{
+			"from": from, "project": proj, "slug": slug, "force": force,
+		})
+		handle(resp, err, func(data any) {
+			m := data.(map[string]any)
+			fmt.Printf("unpublished slug=%s worktree_removed=%v room_archived=%v\n",
+				m["slug"], m["worktree_removed"], m["room_archived"])
 		})
 
 	case "show":
-		resp, err := request("plan_show", map[string]any{
-			"from": from, "project": proj,
+		slug := ""
+		if len(rest) >= 1 && rest[0] != "" && rest[0][0] != '-' {
+			slug = rest[0]
+		}
+		resp, err := request("task_show", map[string]any{
+			"from": from, "project": proj, "slug": slug,
 		})
 		handle(resp, err, func(data any) {
 			m := data.(map[string]any)
+			if slug != "" {
+				fmt.Printf("slug=%s owner=%s status=%s branch=%v worktree=%v\n",
+					m["slug"], m["owner"], m["status"], m["branch"], m["worktree"])
+				if brief, _ := m["brief"].(string); brief != "" {
+					fmt.Printf("---\n%s\n---\n", brief)
+				}
+				return
+			}
 			fmt.Printf("project=%s supervisor=%s\n", m["project_id"], m["supervisor"])
-			rows, _ := m["assignments"].([]any)
+			rows, _ := m["tasks"].([]any)
 			for _, row := range rows {
 				a := row.(map[string]any)
 				fmt.Printf("  slug=%-24s owner=%-16s status=%s\n", a["slug"], a["owner"], a["status"])
@@ -599,13 +684,13 @@ func cmdPlan(args []string) {
 		})
 
 	case "list":
-		resp, err := request("plan_list", map[string]any{"from": from})
+		resp, err := request("task_list", map[string]any{"from": from})
 		handle(resp, err, func(data any) {
-			plans, _ := data.([]any)
-			for _, p := range plans {
+			lists, _ := data.([]any)
+			for _, p := range lists {
 				m := p.(map[string]any)
 				fmt.Printf("project=%s supervisor=%s\n", m["project_id"], m["supervisor"])
-				rows, _ := m["assignments"].([]any)
+				rows, _ := m["tasks"].([]any)
 				for _, row := range rows {
 					a := row.(map[string]any)
 					fmt.Printf("  slug=%-24s owner=%-16s status=%s\n", a["slug"], a["owner"], a["status"])
@@ -615,11 +700,11 @@ func cmdPlan(args []string) {
 
 	case "handoff":
 		if len(rest) < 1 || rest[0] == "" || rest[0][0] == '-' {
-			fmt.Fprintln(os.Stderr, "usage: kopos plan handoff <new-supervisor> [--project <id>]")
+			fmt.Fprintln(os.Stderr, "usage: kopos task handoff <new-supervisor> [--project <id>]")
 			os.Exit(1)
 		}
 		newSup := rest[0]
-		resp, err := request("plan_handoff", map[string]any{
+		resp, err := request("task_handoff", map[string]any{
 			"from": from, "project": proj, "to": newSup,
 		})
 		handle(resp, err, func(data any) {
@@ -628,7 +713,7 @@ func cmdPlan(args []string) {
 		})
 
 	default:
-		fmt.Fprintf(os.Stderr, "unknown plan subcommand: %s\n", sub)
+		fmt.Fprintf(os.Stderr, "unknown task subcommand: %s\n", sub)
 		os.Exit(1)
 	}
 }

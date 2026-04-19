@@ -7,7 +7,7 @@ _kopos() {
     cur="${COMP_WORDS[COMP_CWORD]}"
     prev="${COMP_WORDS[COMP_CWORD-1]}"
 
-    local commands="register unregister init prompt run agents nickname rooms room join leave participants post tell ask read peek read-any channels history plan renew stop protocol help --version --help -h"
+    local commands="register unregister init prompt run agents nickname rooms room join leave participants post tell ask read peek read-any channels history task renew stop protocol help --version --help -h"
 
     if [[ $COMP_CWORD -eq 1 ]]; then
         COMPREPLY=( $(compgen -W "$commands" -- "$cur") )
@@ -44,9 +44,9 @@ _kopos() {
                 COMPREPLY=( $(compgen -W "--desc" -- "$cur") )
             fi
             ;;
-        plan)
+        task)
             if [[ $COMP_CWORD -eq 2 ]]; then
-                COMPREPLY=( $(compgen -W "create assign unassign status claim show list handoff" -- "$cur") )
+                COMPREPLY=( $(compgen -W "publish bulletin claim status unassign reassign unpublish show list handoff" -- "$cur") )
                 return
             fi
             case "$sub" in
@@ -57,16 +57,16 @@ _kopos() {
                         COMPREPLY=( $(compgen -W "--project" -- "$cur") )
                     fi
                     ;;
-                assign)
-                    COMPREPLY=( $(compgen -W "--worktree --goal --kickoff --project" -- "$cur") )
+                publish)
+                    COMPREPLY=( $(compgen -W "--file --project" -- "$cur") )
                     ;;
-                create)
-                    COMPREPLY=( $(compgen -W "--goal --project" -- "$cur") )
+                reassign)
+                    COMPREPLY=( $(compgen -W "--project" -- "$cur") )
                     ;;
-                claim)
-                    COMPREPLY=( $(compgen -W "--worktree --project" -- "$cur") )
+                unpublish)
+                    COMPREPLY=( $(compgen -W "--force --project" -- "$cur") )
                     ;;
-                show|list|unassign|handoff)
+                claim|bulletin|show|list|unassign|handoff)
                     COMPREPLY=( $(compgen -W "--project" -- "$cur") )
                     ;;
             esac

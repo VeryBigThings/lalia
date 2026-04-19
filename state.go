@@ -13,9 +13,10 @@ type Agent struct {
 	Role       string    `json:"role,omitempty"`     // "supervisor" | "worker" | ""
 	Harness    string    `json:"harness,omitempty"`  // claude-code | codex | cursor | …
 	Model      string    `json:"model,omitempty"`    // e.g. claude-opus-4-7
-	Project    string    `json:"project,omitempty"`  // resolved from git remote or cwd
-	RepoURL    string    `json:"repo_url,omitempty"` // full remote URL when available
-	Worktree   string    `json:"worktree,omitempty"` // basename of cwd
+	Project    string    `json:"project,omitempty"`   // resolved from git remote or cwd
+	RepoURL    string    `json:"repo_url,omitempty"`  // full remote URL when available
+	RepoRoot   string    `json:"repo_root,omitempty"` // absolute path of main worktree, used by task publish
+	Worktree   string    `json:"worktree,omitempty"`  // basename of cwd
 	Branch     string    `json:"branch,omitempty"`   // git rev-parse --abbrev-ref HEAD
 	CWD        string    `json:"cwd,omitempty"`      // full path the agent is running from
 	PID        int       `json:"pid"`
@@ -34,7 +35,12 @@ type State struct {
 	nameIdx  map[string]string // name → agent_id (multiple IDs per name possible)
 	channels map[string]*Channel
 	rooms    map[string]*Room
-	plans    map[string]*Plan // keyed by project_id
+	tasks    map[string]*TaskList // keyed by project_id
+
+	// per-repo git serialization: publishes in the same repo_root must not
+	// interleave `git worktree add` calls.
+	repoLocksMu sync.Mutex
+	repoLocks   map[string]*sync.Mutex
 
 	// state-level any-waiters: one per agent_id, 1-buffered
 	anyWaiter map[string]chan anyMsg
@@ -57,13 +63,17 @@ func newState() (*State, error) {
 		nameIdx:   make(map[string]string),
 		channels:  make(map[string]*Channel),
 		rooms:     make(map[string]*Room),
-		plans:     make(map[string]*Plan),
+		tasks:     make(map[string]*TaskList),
+		repoLocks: make(map[string]*sync.Mutex),
 		anyWaiter: make(map[string]chan anyMsg),
 		writes:    make(chan writeOp, 128),
 		stop:      make(chan struct{}),
 	}
 	if err := ensureWorkspace(); err != nil {
 		return nil, err
+	}
+	if err := migratePlansToTasks(); err != nil {
+		return nil, fmt.Errorf("migrate plans to tasks: %w", err)
 	}
 	q, err := openQueue(leschDir())
 	if err != nil {
@@ -73,7 +83,7 @@ func newState() (*State, error) {
 	if err := s.loadRegistry(); err != nil {
 		return nil, err
 	}
-	if err := s.loadPlans(); err != nil {
+	if err := s.loadTaskLists(); err != nil {
 		return nil, err
 	}
 	if err := s.loadRooms(); err != nil {
@@ -345,22 +355,26 @@ func (s *State) dispatch(req Request) Response {
 		return s.opChannels(req)
 	case "renew":
 		return s.opRenew(req)
-	case "plan_create":
-		return s.opPlanCreate(req)
-	case "plan_assign":
-		return s.opPlanAssign(req)
-	case "plan_unassign":
-		return s.opPlanUnassign(req)
-	case "plan_status":
-		return s.opPlanStatus(req)
-	case "plan_claim":
-		return s.opPlanClaim(req)
-	case "plan_show":
-		return s.opPlanShow(req)
-	case "plan_list":
-		return s.opPlanList(req)
-	case "plan_handoff":
-		return s.opPlanHandoff(req)
+	case "task_publish":
+		return s.opTaskPublish(req)
+	case "task_unassign":
+		return s.opTaskUnassign(req)
+	case "task_status":
+		return s.opTaskStatus(req)
+	case "task_claim":
+		return s.opTaskClaim(req)
+	case "task_show":
+		return s.opTaskShow(req)
+	case "task_list":
+		return s.opTaskList(req)
+	case "task_bulletin":
+		return s.opTaskBulletin(req)
+	case "task_reassign":
+		return s.opTaskReassign(req)
+	case "task_unpublish":
+		return s.opTaskUnpublish(req)
+	case "task_handoff":
+		return s.opTaskHandoff(req)
 	case "stop":
 		return s.opStop()
 	default:
@@ -387,6 +401,7 @@ func (s *State) opRegister(req Request) Response {
 		Model:    strVal(req.Args, "model"),
 		Project:  strVal(req.Args, "project"),
 		RepoURL:  strVal(req.Args, "repo_url"),
+		RepoRoot: strVal(req.Args, "repo_root"),
 		Worktree: strVal(req.Args, "worktree"),
 		Branch:   strVal(req.Args, "branch"),
 		CWD:      strVal(req.Args, "cwd"),
@@ -420,6 +435,9 @@ func (s *State) opRegister(req Request) Response {
 	if info.RepoURL != "" {
 		a.RepoURL = info.RepoURL
 	}
+	if info.RepoRoot != "" {
+		a.RepoRoot = info.RepoRoot
+	}
 	if info.Worktree != "" {
 		a.Worktree = info.Worktree
 	}
@@ -436,7 +454,6 @@ func (s *State) opRegister(req Request) Response {
 	snapshot := *a
 	s.mu.Unlock()
 	s.persistAgent(&snapshot)
-	s.deliverKickoffs(name)
 	return Response{OK: true, Data: map[string]any{
 		"name":       name,
 		"agent_id":   snapshot.AgentID,
@@ -462,15 +479,15 @@ func (s *State) opUnregister(req Request) Response {
 		s.mu.Unlock()
 		return errorResponse(CodeNotFound, "not_registered", "run kopos register before unregister", "not registered: "+from, map[string]any{"from": from})
 	}
-	// Reject unregister if this agent is a supervisor with active (non-empty) plan assignments.
-	for pid, plan := range s.plans {
-		if plan.Supervisor != from {
+	// Reject unregister if this agent is a supervisor with active (non-merged) tasks.
+	for pid, tl := range s.tasks {
+		if tl.Supervisor != from {
 			continue
 		}
-		for _, asgn := range plan.Assignments {
-			if asgn.Status != statusMerged {
+		for _, t := range tl.Tasks {
+			if t.Status != statusMerged {
 				s.mu.Unlock()
-				return errorResponse(CodeSupervisorBusy, "supervisor_busy", "run kopos plan handoff <agent> first to transfer ownership", "supervisor still owns active assignments in project "+pid, map[string]any{"project": pid, "slug": asgn.Slug})
+				return errorResponse(CodeSupervisorBusy, "supervisor_busy", "run kopos task handoff <agent> first to transfer ownership", "supervisor still owns active tasks in project "+pid, map[string]any{"project": pid, "slug": t.Slug})
 			}
 		}
 	}

@@ -39,7 +39,8 @@ const (
 	CodeNotYourTurn  = 4
 	CodeNotFound     = 5
 	CodeUnauthorized    = 6 // signature rejected or caller not registered
-	CodeSupervisorBusy = 7 // supervisor still owns a non-empty plan; handoff first
+	CodeSupervisorBusy = 7 // supervisor still owns a non-empty task list; handoff first
+	CodeProjectIdentityMismatch = 8 // publish payload project does not match caller's registered project
 )
 
 func errorResponse(code int, reason, retryHint, message string, context map[string]any) Response {

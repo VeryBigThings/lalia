@@ -1,46 +1,71 @@
 package main
 
 import (
+	"os"
+	"os/exec"
+	"path/filepath"
 	"sync"
 	"testing"
 )
 
+// mustInitRepoForIntegration creates a git repo with one commit for tests
+// that drive task_publish through the real daemon.
+func mustInitRepoForIntegration(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	run := func(args ...string) {
+		cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+		cmd.Env = append(os.Environ(),
+			"GIT_AUTHOR_NAME=test", "GIT_AUTHOR_EMAIL=test@example.com",
+			"GIT_COMMITTER_NAME=test", "GIT_COMMITTER_EMAIL=test@example.com",
+		)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	run("init", "--initial-branch=main", ".")
+	if err := os.WriteFile(filepath.Join(dir, "README"), []byte("seed\n"), 0644); err != nil {
+		t.Fatalf("seed file: %v", err)
+	}
+	run("add", "README")
+	run("commit", "-m", "init")
+	return dir
+}
+
 // TestRoomsGCArchivePersistsAcrossRestart: `rooms gc` archives a merged-room;
 // after daemon restart the room is still archived and new posts are rejected.
 // Guards the invariant that archive state lives in SQLite, not derived from
-// plan status at boot.
+// task status at boot.
 func TestRoomsGCArchivePersistsAcrossRestart(t *testing.T) {
 	koposHome := setupIntegrationEnv(t)
 	defer stopDaemonForHome(t, koposHome)
 
-	mustRequest(t, "register", map[string]any{"name": "sup", "pid": float64(9001), "role": "supervisor"})
+	repoRoot := mustInitRepoForIntegration(t)
+
+	mustRequest(t, "register", map[string]any{
+		"name": "sup", "pid": float64(9001), "role": "supervisor",
+		"project": "gc-test", "repo_root": repoRoot,
+	})
 	mustRequest(t, "register", map[string]any{"name": "alice", "pid": float64(9002), "role": "worker"})
 
-	// Supervisor needs an explicit project id because integration env has no git.
-	proj := "gc-test"
-	if r := mustRequest(t, "plan_create", map[string]any{
-		"from": "sup", "project": proj, "slug": "feat-done", "goal": "x",
-	}); !r.OK {
-		t.Fatalf("plan_create: %+v", r)
+	pub := mustRequest(t, "task_publish", map[string]any{
+		"from": "sup", "project": "gc-test", "repo_root": repoRoot,
+		"workstreams": []any{map[string]any{"slug": "feat-done", "branch": "feat/done", "brief": "done"}},
+	})
+	if !pub.OK {
+		t.Fatalf("task_publish: %+v", pub)
 	}
-	if r := mustRequest(t, "plan_assign", map[string]any{
-		"from": "sup", "project": proj, "slug": "feat-done", "owner": "alice", "worktree": "/tmp",
+	if r := mustRequest(t, "task_status", map[string]any{
+		"from": "sup", "project": "gc-test", "slug": "feat-done", "status": "merged",
 	}); !r.OK {
-		t.Fatalf("plan_assign: %+v", r)
-	}
-	if r := mustRequest(t, "plan_status", map[string]any{
-		"from": "sup", "project": proj, "slug": "feat-done", "status": "merged",
-	}); !r.OK {
-		t.Fatalf("plan_status merged: %+v", r)
+		t.Fatalf("task_status merged: %+v", r)
 	}
 
-	// Room must still be live: unassigned/merged no longer auto-archive.
 	postLive := mustRequest(t, "post", map[string]any{"from": "sup", "room": "feat-done", "body": "post-merge note"})
 	if !postLive.OK {
 		t.Fatalf("post to live merged room should succeed, got %+v", postLive)
 	}
 
-	// GC archives the room.
 	gc := mustRequest(t, "rooms_gc", map[string]any{"from": "sup"})
 	if !gc.OK {
 		t.Fatalf("rooms_gc: %+v", gc)
@@ -48,11 +73,12 @@ func TestRoomsGCArchivePersistsAcrossRestart(t *testing.T) {
 
 	restartDaemon(t, koposHome)
 
-	mustRequest(t, "register", map[string]any{"name": "sup", "pid": float64(9003), "role": "supervisor"})
+	mustRequest(t, "register", map[string]any{
+		"name": "sup", "pid": float64(9003), "role": "supervisor",
+		"project": "gc-test", "repo_root": repoRoot,
+	})
 	mustRequest(t, "register", map[string]any{"name": "alice", "pid": float64(9004), "role": "worker"})
 
-	// Post must be rejected because the room is archived — and that state
-	// must have survived the restart via SQLite, not plan-status derivation.
 	postAfter := mustRequest(t, "post", map[string]any{"from": "sup", "room": "feat-done", "body": "should fail"})
 	if postAfter.OK {
 		t.Fatalf("post to archived room after restart should fail, got %+v", postAfter)

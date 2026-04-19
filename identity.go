@@ -30,6 +30,7 @@ type AgentInfo struct {
 	Model    string
 	Project  string
 	RepoURL  string
+	RepoRoot string // absolute path of the main worktree, used by task publish
 	Worktree string
 	Branch   string
 	CWD      string
@@ -55,6 +56,17 @@ func DetectAgentInfo(overrides AgentInfo) AgentInfo {
 	info.RepoURL = overrides.RepoURL
 	if info.RepoURL == "" {
 		info.RepoURL = gitOutput("config", "--get", "remote.origin.url")
+	}
+
+	info.RepoRoot = overrides.RepoRoot
+	if info.RepoRoot == "" {
+		if root := gitOutput("rev-parse", "--show-toplevel"); root != "" {
+			if abs, err := filepath.Abs(root); err == nil {
+				info.RepoRoot = abs
+			} else {
+				info.RepoRoot = root
+			}
+		}
 	}
 
 	info.Project = overrides.Project

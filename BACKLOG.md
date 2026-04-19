@@ -75,10 +75,11 @@ private 1:1 problem-solving, identity questions, anything the rest
 of the project genuinely shouldn't see. If the conversation is about
 a specific workstream, it probably belongs in the slug's room.
 
-Today this is manual — the supervisor runs `kopos room create <slug>`
-then `kopos join <slug>` and tells the worker to join. Workstream H
-will automate it (rooms auto-created by `plan assign`, owner auto-
-joined on `plan claim`).
+This is automated by `kopos task publish`: the supervisor publishes a
+structured plan and kopos creates the workstream room, joins the
+supervisor, and posts the context bundle as the first message. A
+worker's `kopos task claim <slug>` auto-joins the worker to that
+room.
 
 ## If you are a worker agent — bootstrap
 
@@ -612,87 +613,94 @@ behavior when backend is unavailable.
 **Agent fit**: Self-contained. Works for any agent that can read
 `signing.go`.
 
-### H. Plan primitive + supervisor/worker roles
+### H. Task primitive + supervisor/worker roles
 
-**Goal**: Replace this markdown file as the source of truth for
-assignments. Move the assignment table into a git-backed `plan.json`
-per project, mutable via `kopos plan …` commands. Introduce a role
-axis on Agent (supervisor vs worker) so the daemon knows who can mutate
-what. BACKLOG.md stays for rationale, rules of engagement, cold-
-start reading — it stops holding live state.
+**Goal**: Replace this markdown file as the source of truth for work
+assignments. Move the assignment table into a git-backed `task-list.json`
+per project, mutable via `kopos task …` commands. Introduce a role axis
+on Agent (supervisor vs worker) so the daemon knows who can mutate what.
+BACKLOG.md stays for rationale, rules of engagement, cold-start reading
+— it stops holding live state.
 
-**Scope** (decisions already made, see conversation log):
+**Scope** (as shipped — see git history for the evolution):
 - Roles set at `register --role worker|supervisor`. Stored on Agent.
   No cross-agent privilege beyond command-surface gating.
-- One supervisor per project. Unregister rejects (`SupervisorBusy`) if the
-  supervisor still owns a non-empty plan; must `plan handoff <agent>`
-  first.
-- Project id auto-derived: `git remote get-url origin` slugified;
-  fallback to repo basename when no remote.
-- Plan storage: `<workspace>/plans/<project-id>/plan.json`. Same write
-  queue as registry / room writes.
-- Assignment shape: `{slug, goal, worktree, owner, status,
-  kickoff, kickoff_delivered, updated_at}` with status ∈ `open |
-  assigned | in-progress | ready | blocked | merged`.
-- Supervisor-only mutations: `plan create <goal>`, `plan assign <slug>
-  <agent> --worktree <path> --goal "..." [--kickoff "..."]`,
-  `plan unassign <slug>`, `plan handoff <new-supervisor>`. `assign`
-  verifies the worktree path exists on the supervisor's machine before
-  writing.
-- Worker self-service: `plan status <slug> in-progress|ready|blocked`
-  flips the caller's own row only; daemon rejects writes to a row
-  the caller does not own. `plan claim <slug>` verifies worktree
-  exists on caller's machine, sets owner=self, status=in-progress.
-- Anyone can read: `plan show [--project <id>]` defaults to cwd's
-  project; `plan list` returns plans where caller is supervisor or owner.
-- **Assignment-scoped rooms**: `plan assign` auto-creates a room
-  named after the slug, auto-joins supervisor + owner. All coordination
-  about the assignment happens there so context survives session
-  kills (git transcript, unbounded history). `plan handoff` rewires
-  room membership. Setting status to `merged` archives the room
-  (no new posts allowed, transcript kept; sweeper can reap the
-  room record after N days, or keep indefinitely — call it during
-  implementation).
-- **Pre-registration kickoff delivery**: if `plan assign` carries
-  `--kickoff`, the text is stored on the assignment with
-  `kickoff_delivered=false`. When the owner next calls `register`,
-  `opRegister` scans plans, finds undelivered kickoffs for this
-  agent, synthesizes a post from the supervisor into the assignment
-  room, and flips `kickoff_delivered=true`. Idempotent on
-  re-register. Solves "supervisor wants to assign work before the
-  worker harness is up" without weakening the `tell`
-  invariant that peers must be registered.
+- One supervisor per project. Unregister rejects (`SupervisorBusy`) if
+  the supervisor still owns non-merged tasks; must `task handoff
+  <agent>` first.
+- Project id auto-derived from `git remote get-url origin` slugified;
+  fallback to repo basename. `repo_root` captured at register time.
+- Task list storage: `<workspace>/tasks/<project-id>/task-list.json`.
+- Task shape: `{slug, branch, brief, owned_paths, contracts, worktree,
+  owner, status, updated_at}` with status ∈ `open | assigned |
+  in-progress | ready | blocked | merged`.
+- Supervisor-only mutations: `task publish --file <payload>`,
+  `task unassign <slug>`, `task reassign <slug> <agent>`,
+  `task handoff <new-supervisor>`. publish creates N worktrees + N
+  rooms + N bundle posts atomically per slug (one slug failing does
+  not block the rest); republish against the same commit is a no-op.
+- Worker self-service: `task bulletin [--project <id>]` lists open
+  tasks regardless of caller role (this is the discovery surface);
+  `task claim <slug>` atomically flips open → in-progress, auto-joins
+  the room, returns the bundle; `task status <slug>
+  in-progress|ready|blocked` mutates the caller's own row only.
+- Anyone can read: `task show [<slug>] [--project <id>]` defaults to
+  cwd's project; `task list` returns lists where caller is supervisor
+  or owner.
+- **Workstream-scoped rooms**: `task publish` creates the slug-named
+  room, joins the supervisor, and posts the bundle as the room's
+  first message. `task claim` auto-joins the worker. `task handoff`
+  rewires room membership. Setting status to `merged` does not
+  archive the room — `kopos rooms gc` is the opt-in cleanup step.
+- Worktree ownership: `task publish` shells out to `git worktree add`
+  on behalf of the supervisor under `<parent-of-repo_root>/wt/<slug>`,
+  with per-repo serialization and per-slug rollback on partial
+  failure. Supervisors never run `git worktree add` themselves.
 
-**Files**: new `plan.go` (core), new `project.go` (git-remote →
-project-id resolver), `state.go` (new ops + role-gated dispatch
-checks), `registry.go` (Role field on Agent, persist), `client.go`
-(cmdPlan* subcommands), `main.go` (dispatch), `help.go` (document),
-`protocol.go` (new error code `SupervisorBusy`, additive), new tests.
+**Files**: `task.go` (core + publish + migration), `state.go`
+(dispatch + role-gated checks), `registry.go` (Role + RepoRoot on
+Agent), `client.go` (cmdTask), `main.go` (dispatch), `help.go`
+(document), `protocol.go` (new error codes `SupervisorBusy`,
+`ProjectIdentityMismatch`).
 
-**Tests**: role persists across re-register; worker cannot mutate
-other workers' rows; worker can flip own status; supervisor cannot be
-unregistered while holding a non-empty plan; handoff atomically
-transfers supervisor rights (including room membership); project id
-derivation from remote vs repo-basename; plan file round-trips
-through git; assign auto-creates a room with the right members;
-merged status archives the room to read-only; kickoff is delivered
-on first register and not replayed on subsequent registers.
+**Status**: Shipped. The initial `plan_*` surface (with `plan assign`
++ pre-registration kickoff delivery) was replaced by publish-pull in
+a follow-up pass; see the kopos workflow spec for motivation.
 
-**Blockers**: Heavy collision with A (identity) on `state.go`
-dispatch + `registry.go` Agent record. Both add fields; last-to-merge
-rebases, but the conceptual overlap is real — identity lands ULID
-agent_id, plan adds Role. Sensible to sequence H **after** A so H
-builds on stable Agent shape. F overlap is minor (new error code is
-additive).
+### S. `task spawn` — kopos as agent lifecycle bus (future)
 
-**Agent fit**: Deep context. Touches the edit surface of every
-dispatch path plus the registry. Whoever owns this should already
-have shipped at least one prior workstream with full internals
-loaded. Not a cold-start task.
+**Goal**: Let a supervisor-class agent spawn one-shot or multi-shot
+sub-agent processes (claude-code, codex, gemini, copilot, …) against
+a specific workstream and read their room traffic to guide the next
+iteration. kopos becomes the communication bus **and** the process
+manager for those sub-agents.
 
-**Status**: Designed but unassigned. Pick it up after A merges; the
-natural candidate is whichever of the current three agents finishes
-their current batch first with clean test runs.
+**Why**: Today a human has to stand up each worker harness in a
+shell, set `KOPOS_NAME`, and direct it to the right slug. For fully
+autonomous orchestration the supervisor needs a primitive to say
+"spin up a worker of runtime R against slug S, seat it, let it work,
+report back when it exits." This is the right home for the spawn
+semantics that `plan assign` vaguely gestured at but never did
+cleanly.
+
+**Sketch** (not final):
+- `task spawn <slug> --runtime <claude-code|codex|…> [--one-shot]`:
+  supervisor-only. Registers a transient agent, launches the
+  configured harness in the workstream's worktree with the role
+  prompt wired in, links its stdout/stderr into the room, claims the
+  slug on its behalf, and monitors the process.
+- Multi-shot: the spawned agent can emit structured "iterate" /
+  "done" messages in-room; supervisor re-prompts on iterate, tears
+  down on done.
+- Lifecycle signals piggyback on rooms (supervisor posts a control
+  message; harness interprets). No new transport.
+
+**Non-goals**: replacing human supervisors; auto-merging; scheduling
+across machines. Local-first, per-repo, per-user.
+
+**Status**: Future work. Captured after the publish-pull rewrite to
+make clear that kopos-initiated agent lifecycle is the expected home
+for the assignment-push semantics removed from `task publish`.
 
 ### F. Structured error payloads
 

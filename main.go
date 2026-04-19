@@ -60,8 +60,8 @@ func main() {
 		cmdChannels(os.Args[2:])
 	case "history":
 		cmdHistory(os.Args[2:])
-	case "plan":
-		cmdPlan(os.Args[2:])
+	case "task":
+		cmdTask(os.Args[2:])
 	case "renew":
 		cmdRenew(os.Args[2:])
 	case "stop":
@@ -80,6 +80,10 @@ func main() {
 func usage() {
 	fmt.Fprintf(os.Stderr, `kopos - agent-to-agent coordination
 
+If you are an LLM, run "kopos prompt <your-role>" first to load the
+workflow instructions for your role (worker or supervisor). The commands
+listed below are the surface; the prompt tells you how to use them.
+
 Peer-to-peer (English intent → command):
   tell X       = one-way notification / "notify, publish, inform"
   ask X        = question expecting answer / "ask, check with, query"
@@ -93,8 +97,13 @@ Rooms (N-party):
   peek R --room = inspect room mailbox
 
 Usage:
-  kopos init <worker|supervisor>       print role bootstrap prompt to stdout
-  kopos prompt <worker|supervisor>     alias of init — print prompt to stdout
+  kopos init <worker|supervisor>       LLM entry point: prints the role
+                                        bootstrap prompt to stdout. Pipe into
+                                        the harness instructions file before
+                                        the session starts.
+  kopos prompt <worker|supervisor>     LLM entry point (in-session): prints
+                                        the same role prompt so the agent can
+                                        reload its workflow context on demand.
   kopos run <worker|supervisor> --claude-code [args...]
   kopos run <worker|supervisor> --codex       [args...]
   kopos run <worker|supervisor> --copilot     [--force] [args...]
@@ -113,7 +122,7 @@ Usage:
 
   kopos rooms                           list known rooms
   kopos rooms gc                        supervisor: archive rooms for merged
-                                        assignments in plans you supervise
+                                        tasks in lists you supervise
   kopos room create <name> [--desc <text>]
   kopos join <room>
   kopos leave <room>
@@ -124,15 +133,17 @@ Usage:
   kopos renew                           extend caller's lease
   kopos stop
 
-Plan (supervisor/worker roles):
-  kopos plan create <slug> [--goal <text>] [--project <id>]
-  kopos plan assign <slug> <agent> --worktree <path> [--goal <text>] [--kickoff <text>] [--project <id>]
-  kopos plan unassign <slug> [--project <id>]
-  kopos plan status <slug> <in-progress|ready|blocked|merged> [--project <id>]
-  kopos plan claim <slug> [--worktree <path>] [--project <id>]
-  kopos plan show [--project <id>]
-  kopos plan list
-  kopos plan handoff <new-supervisor> [--project <id>]
+Tasks (supervisor publishes, workers pull):
+  kopos task publish --file <payload.json>   one call: worktrees + rooms + bundles
+  kopos task bulletin [--project <id>]       list open tasks workers can claim
+  kopos task claim <slug> [--project <id>]   atomic: owner=self, status=in-progress, join room
+  kopos task status <slug> <in-progress|ready|blocked|merged> [--project <id>]
+  kopos task unassign <slug> [--project <id>]
+  kopos task reassign <slug> <agent> [--project <id>]
+  kopos task unpublish <slug> [--force] [--project <id>]   retract a published task
+  kopos task show [<slug>] [--project <id>]
+  kopos task list
+  kopos task handoff <new-supervisor> [--project <id>]
   kopos protocol                        print agent-facing protocol guide
   kopos --version
 

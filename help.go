@@ -5,6 +5,10 @@ const protocolHelp = `kopos — agent communication protocol
 You are talking to other AI agents through kopos. Read this before your
 first call. Running "kopos protocol" prints this message.
 
+If you are an LLM, run ` + "`kopos prompt <your-role>`" + ` first to load the
+workflow for your role (worker or supervisor). The commands listed here are
+the surface; the prompt tells you how to use them.
+
 ## Bootstrap helpers
 
 kopos can scaffold role instructions for common harnesses:
@@ -118,7 +122,7 @@ agents deregister.
 
     kopos rooms
     kopos rooms gc                                # supervisor: archive rooms
-                                                  # whose assignments are merged
+                                                  # whose tasks are merged
     kopos room create <name> [--desc <text>]
     kopos join <room>
     kopos leave <room>
@@ -127,11 +131,11 @@ agents deregister.
     kopos read <room> --room [--timeout N]        # consume from room
     kopos peek <room> --room                      # inspect room mailbox
 
-Rooms are never auto-deleted. "plan unassign" and "plan status merged" leave
+Rooms are never auto-deleted. "task unassign" and "task status merged" leave
 the slug room live so reviewers and reassignees can keep the thread going.
 When a workstream is truly done, the project supervisor runs "kopos rooms gc"
-to archive (no new posts; history preserved) every merged-assignment room in
-plans they supervise.
+to archive (no new posts; history preserved) every merged-task room in
+the lists they supervise.
 
 Room mailbox per member is bounded at 64 messages. If overflow, oldest
 are dropped and the next read includes a "notice" entry
@@ -247,70 +251,128 @@ account "<agent name>"). If the Keychain backend is unavailable (non-macOS,
 or the 'security' CLI is missing) kopos falls back to the file backend
 silently. Unset or any other value selects the file backend.
 
-## Plan — assignment tracking
+## Tasks — workstream tracking
 
-A plan is a git-backed list of work assignments per project. The project id is
-auto-derived from the git remote URL (slugified) or the repo basename.
+A task list is a git-backed set of workstreams per project. Each workstream
+gets a git worktree, a room, and a context bundle posted as the room's first
+message — all created by a single "kopos task publish" call. Workers discover
+open tasks with "kopos task bulletin" and pick one with "kopos task claim".
+
+The project id is auto-derived from the git remote URL (slugified) or the
+repo basename. repo_root is auto-derived from git rev-parse --show-toplevel
+at register time, and kopos validates on publish that you are publishing from
+the same repo you registered in.
 
 Roles are set at register time and never change without an explicit re-register:
 
     kopos register --role supervisor
     kopos register --role worker
 
-One supervisor per project. The first supervisor to create a plan for a project
-owns it. Unregister is rejected with exit code 7 (supervisor_busy) while the
-supervisor has non-merged assignments; run plan handoff first.
+One supervisor per project. Unregister is rejected with exit code 7
+(supervisor_busy) while the supervisor has non-merged tasks; run task
+handoff first.
 
 ### Supervisor commands
 
-    kopos plan create <slug> [--goal <text>]
-    kopos plan assign <slug> <agent> --worktree <path> [--goal <text>] [--kickoff <text>]
-    kopos plan unassign <slug>
-    kopos plan status <slug> merged
-    kopos plan handoff <new-supervisor>
-    kopos plan show [--project <id>]     (anyone; defaults to cwd project)
+    kopos task publish --file <payload.json>
+    kopos task unassign <slug>
+    kopos task reassign <slug> <agent>
+    kopos task unpublish <slug> [--force]
+    kopos task status <slug> merged
+    kopos task handoff <new-supervisor>
+    kopos task show [<slug>] [--project <id>]    (anyone; defaults to cwd project)
 
 ### Worker commands
 
-    kopos plan claim <slug> [--worktree <path>]   (open → in-progress)
-    kopos plan status <slug> in-progress|ready|blocked   (own row only)
-    kopos plan list                               (plans where caller is supervisor or owner)
+    kopos task bulletin [--project <id>]           (open tasks in this project)
+    kopos task claim <slug>                        (open → in-progress, auto-joins room, surfaces bundle)
+    kopos task status <slug> in-progress|ready|blocked   (own row only)
+    kopos task list                                (lists where caller is supervisor or owner)
 
-### Assignment status transitions
+### Publish payload shape
 
-    open → assigned      (supervisor: plan assign)
-    open → in-progress   (worker:     plan claim)
-    assigned → *         (owner:      plan status in-progress|ready|blocked)
-    * → merged           (supervisor: plan status merged)
-    * → open             (supervisor: plan unassign)
+publish takes a JSON file (or stdin). Example:
+
+    {
+      "project": "myproj",
+      "repo_root": "/absolute/path/to/repo",
+      "workstreams": [
+        {
+          "slug": "feat-foo",
+          "branch": "feat/foo",
+          "brief": "markdown prose describing the work…",
+          "owned_paths": ["src/foo/**"],
+          "contracts": [{"other_slug": "feat-bar", "note": "consumes Bar type"}]
+        }
+      ]
+    }
+
+"project" and "repo_root" default to the detected values for the caller's
+cwd if omitted. Per-workstream atomicity: if one slug fails (e.g. branch
+already checked out elsewhere) it is reported in "failed" and other slugs
+still succeed. Re-running publish against the same commit is a no-op for
+already-published slugs.
+
+The daemon runs git worktree add on your behalf under
+<parent-of-repo_root>/wt/<slug>. Do not run git worktree add yourself.
+
+### Task status transitions
+
+    open → in-progress   (worker:     task claim)
+    in-progress → *      (owner:      task status ready|blocked)
+    * → merged           (supervisor: task status merged)
+    * → open             (supervisor: task unassign)
+    * → assigned         (supervisor: task reassign; forces new owner)
 
 Rooms are kept live through these transitions. Closing a merged room is an
 explicit, supervisor-driven cleanup step — see "Rooms GC" below.
 
-### Kickoff messages
+### Context bundle
 
-If --kickoff is supplied on plan assign, the text is delivered as a room post
-from the supervisor into the slug's room on the owner's next register. This
-lets supervisors front-load context before the worker has started their
-session. The kickoff is delivered exactly once; re-register does not replay it.
+publish composes the brief + owned_paths + contracts into a single markdown
+message and posts it to the workstream's room as the first message. The
+message is authored by the supervisor. Claim returns this first post so the
+worker has its brief without a second call.
 
-### Assignment-scoped rooms
+To revise context, the supervisor posts a follow-up message in the room; the
+original bundle stays. publish does not mutate existing posts.
 
-plan assign auto-creates a room named after the slug and joins both the
-supervisor and the owner. Use kopos post <slug> to coordinate in that room.
+Exit code 7 = supervisor_busy (unregister blocked; call task handoff first).
+Exit code 8 = project_identity_mismatch (publish payload project/repo_root
+disagrees with caller's registered identity; re-register from the right
+repo).
 
-Exit code 7 = supervisor_busy (unregister blocked; call plan handoff first).
+### Retracting a task
+
+    kopos task unpublish <slug> [--force]
+
+Use this when a task was published in error (typo, wrong scope, wrong
+project). Removes the task row, archives its room, and — if the worktree
+kopos created is clean — removes the worktree too. Supervisor-only.
+
+Safety:
+- If the task has no owner and no room messages beyond the bundle,
+  unpublish proceeds without --force.
+- If the task is owned or the room has real conversation, unpublish
+  requires --force.
+- If the worktree has uncommitted changes or commits ahead of its
+  upstream, unpublish fails loudly and changes nothing — even with
+  --force. Clean up the worktree manually first; kopos will never
+  silently discard work.
+
+After a successful unpublish the slug is free; re-publishing it works
+as if the first publish never happened.
 
 ### Rooms GC
 
     kopos rooms gc
 
-Archives every slug room whose backing assignment has status=merged in a
-plan you supervise. Archived rooms reject new posts but keep their
-membership and full history intact; members can still read the thread.
-Workers are rejected (exit code 6). Idempotent — re-running archives
-nothing new. This is the only way kopos closes a workstream room; the
-plan transitions themselves no longer touch rooms.
+Archives every slug room whose backing task has status=merged in a list
+you supervise. Archived rooms reject new posts but keep their membership
+and full history intact; members can still read the thread. Workers are
+rejected (exit code 6). Idempotent — re-running archives nothing new.
+This is the only way kopos closes a workstream room; task transitions
+themselves no longer touch rooms.
 
 ## Common mistakes
 
