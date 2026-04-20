@@ -52,6 +52,21 @@ Open workstreams in priority order. For what has already shipped, see
 
 ---
 
+### Z. `lalia task gc` — prune merged task rows
+
+**Goal**: Remove merged task rows from task-list.json so the list doesn't
+grow indefinitely.
+
+**Scope**:
+- New command `lalia task gc [--project <id>]`, supervisor-only.
+- Drops all rows with `status=merged` from the project's task-list.json.
+- Prints a summary of what was pruned.
+- Update `lalia help` and `lalia protocol`.
+
+**Priority**: Low. Independent of `rooms gc`.
+
+---
+
 ### Y. Expired-supervisor handoff
 
 **Goal**: Allow `task handoff <new>` to succeed without the outgoing supervisor's
