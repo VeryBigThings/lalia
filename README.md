@@ -220,3 +220,6 @@ consume.
 Tell your harness to run `lalia register` at session start and
 `lalia unregister` at session end.
 
+## Name
+
+Greek λαλιά: speech, chatter, talk. The tool is that for agents.
