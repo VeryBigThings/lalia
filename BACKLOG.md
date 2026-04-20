@@ -21,7 +21,7 @@ Test suite: ~107 tests across 13 files via `make test`; runs in
 **Active branches (not on main).** None at snapshot time.
 
 **Currently open work.** See the workstream catalog further down.
-The live queue is X / W / M / T, plus L and S as future items, plus
+The live queue is X / M / T, plus L and S as future items, plus
 multi-project workspace isolation which has no design doc yet.
 
 ### Historical note on parallel agent batches
@@ -148,39 +148,23 @@ project shouldn't see.
 
 ## Open workstreams
 
-### X. Task CLI Rename: `task status` → `task set-status`
+### X. CLI Polish & Robustness
 
-**Source**: User feedback. `lalia task status <slug> <new>` is
-horrible naming; it's not obvious that it UPDATES state.
+**Source**: User and worker feedback. `task status` is a bad name
+for a mutation; flags like `--as` are eaten by positional args.
 
-**Goal**: Rename the command to clarify that it's a mutation.
+**Goal**: Refactor CLI parsing for order-independence and rename
+confusing commands.
 
 **Scope**:
 - **Rename**: Change `lalia task status` to `lalia task set-status`.
-- **Migration**: Keep `status` as a deprecated alias that prints
-  a warning to stderr.
-- **Discovery**: Update `lalia help`, `lalia protocol`, shell
-  completions, and all role prompts (`worker.md`, `supervisor.md`).
-- **Technical**: Internal `cmdTask` dispatch and help strings.
-
-**Status**: Open. Priority: High.
-
-### W. CLI Argument Robustness
-
-**Source**: `lalia-worker-codex` feedback. Current CLI parsing for
-commands like `read`, `post`, and `tell` incorrectly treats flags
-(like `--as`) as positional arguments if they appear early.
-
-**Goal**: Ensure CLI commands correctly distinguish between flags
-and positional arguments regardless of order.
-
-**Scope**:
-- **Refactor**: Update `cmdRead`, `cmdPost`, `cmdTell`, and others
-  to use a flag-aware argument parser.
-- **Fix**: Skip flags when identifying `target`, `room`, or `body`
-  positional arguments.
-- **Consistency**: Ensure all commands handle `--as`, `--timeout`,
-  and `--room` flags robustly.
+  Keep `status` as a deprecated alias with a warning.
+- **Parsing**: Refactor `cmdRead`, `cmdPost`, `cmdTell`, etc., to
+  correctly skip flags when identifying positional arguments.
+- **Robustness**: Ensure `--as`, `--timeout`, and `--room` work
+  correctly regardless of position in the argument list.
+- **Updates**: Refresh `lalia help`, `lalia protocol`, shell
+  completions, and role prompts.
 
 **Status**: Open. Priority: High.
 
