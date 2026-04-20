@@ -86,3 +86,4 @@ Commit attribution:
 
 Exit protocol:
 - On permanent shutdown, `lalia task handoff <agent>` if you still supervise non-merged tasks, then `lalia unregister`.
+- **Note**: `lalia unregister` is terminal. If you re-register later, you are a fresh identity (new `agent_id`). If a worker you supervise unregisters and returns, they are also a fresh identity; you may need to `lalia task reassign` their tasks to their new identity if they didn't finish before unregistering.

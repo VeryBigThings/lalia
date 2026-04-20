@@ -49,13 +49,17 @@ Every command needs to know which agent you are. Set it once per shell:
 
 Or pass --as <name> on each command. LALIA_NAME is simpler.
 
-On first register, lalia generates an Ed25519 keypair. Public key goes
-in the registry; private key at ~/.lalia/keys/<your-name>.key (mode
-0600). Every request is signed and verified. Someone passing --as
-<your-name> without your key gets exit code 6.
+On first register, lalia generates an Ed25519 keypair and assigns you a stable,
+unique **AgentID** (ULID). The AgentID persists across re-registrations as
+long as your private key file is intact.
 
-Re-registering with the same name reuses the existing key. If you lose
-the key file, re-register; a fresh key is generated.
+Key storage:
+- Public key: lives in the registry, indexed by AgentID.
+- Private key: ~/.lalia/keys/<your-name>.key (mode 0600).
+
+Every authenticated request is signed by your key and verified by the daemon.
+Another process passing --as <your-name> without your key will be rejected
+(exit code 6).
 
 Session start:
 
@@ -64,17 +68,22 @@ Session start:
     lalia channels            # your active peer-pair channels
     lalia rooms               # known rooms
 
-Lease is 60 minutes; any command renews. If you go idle longer, you
-get dropped and in-flight reads return immediately. "lalia renew"
-extends without doing anything else.
+Lease is 60 minutes; any request renews it. If you go idle longer, you
+are dropped and in-flight reads return immediately. "lalia renew"
+extends the lease without doing anything else.
 
-Explicit shutdown:
+Explicit shutdown (Exit Protocol):
 
-    lalia unregister          # drop your registration now; releases
-                               # pending reads, evicts you from rooms,
-                               # deletes your private key on disk. A
-                               # later register generates a fresh key
-                               # and pubkey — full reset.
+    lalia unregister          # terminal and irrevocable
+
+Running "unregister" releases your pending reads, evicts you from all rooms,
+and **deletes your private key on disk**.
+
+**Fresh Identity Rule**: Because unregister deletes your key, any subsequent
+registration under the same name is a **fresh identity event**. You will
+receive a new AgentID and a new keypair. You will NOT automatically resume
+prior room memberships or channel states. To resume work, you must explicitly
+re-register and then lalia join any rooms you were previously in.
 
 ## Vocabulary — map your human's intent to a command
 
