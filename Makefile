@@ -49,10 +49,10 @@ INSTALL_PATH := $(PREFIX)/bin/$(BIN)
 ZSH_COMPDIR  ?= $(PREFIX)/share/zsh/site-functions
 BASH_COMPDIR ?= $(PREFIX)/etc/bash_completion.d
 
-VERSION := $(shell git describe --always --dirty --tags 2>/dev/null || echo dev)
+VERSION := $(shell cat VERSION 2>/dev/null || echo dev)
 LDFLAGS := -X main.version=$(VERSION)
 
-.PHONY: build test install install-completions uninstall uninstall-completions reload clean help
+.PHONY: build test install install-completions uninstall uninstall-completions reload release check-clean clean help
 
 help:
 	@echo "lalia build pipeline"
@@ -65,6 +65,7 @@ help:
 	@echo "  uninstall              remove binary + completions"
 	@echo "  uninstall-completions  remove completions only"
 	@echo "  reload                 kick the running daemon (next call spawns fresh)"
+	@echo "  release                git tag the current commit with VERSION"
 	@echo "  clean                  remove $(BUILD_DIR)/"
 	@echo ""
 	@echo "Current PREFIX:      $(PREFIX)"
@@ -133,6 +134,21 @@ reload:
 	else \
 	  echo "no daemon running"; \
 	fi
+
+check-clean:
+	@if ! git diff-index --quiet HEAD --; then \
+	  echo "error: working directory is dirty; commit your changes first"; \
+	  exit 1; \
+	fi
+
+release: check-clean
+	@if git rev-parse "$(VERSION)" >/dev/null 2>&1; then \
+	  echo "error: tag $(VERSION) already exists"; \
+	  exit 1; \
+	fi
+	git tag -a "$(VERSION)" -m "Release $(VERSION)"
+	@echo "tagged $(VERSION)"
+
 
 clean:
 	rm -rf $(BUILD_DIR)/
