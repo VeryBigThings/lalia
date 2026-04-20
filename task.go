@@ -71,7 +71,7 @@ type legacyAssignment struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
-// migratePlansToTasks performs a one-shot rename of $KOPOS_WORKSPACE/plans/
+// migratePlansToTasks performs a one-shot rename of $LALIA_WORKSPACE/plans/
 // to tasks/ and converts each plan.json into task-list.json with the new
 // schema. Idempotent: returns nil and does nothing if tasks/ already exists.
 func migratePlansToTasks() error {
@@ -222,7 +222,7 @@ func findTask(tl *TaskList, slug string) *Task {
 func (s *State) requireSupervisor(from, projectID string) (Response, bool) {
 	a := s.agentByName(from)
 	if a == nil {
-		return errorResponse(CodeUnauthorized, "not_registered", "run kopos register", "not registered: "+from, map[string]any{"from": from}), false
+		return errorResponse(CodeUnauthorized, "not_registered", "run lalia register", "not registered: "+from, map[string]any{"from": from}), false
 	}
 	if a.Role != "supervisor" {
 		return errorResponse(CodeUnauthorized, "not_supervisor", "register with --role supervisor", "caller is not a supervisor: "+from, map[string]any{"from": from}), false
@@ -373,14 +373,14 @@ func (s *State) internalPost(r *Room, from, body string) {
 func (s *State) opRoomsGC(req Request) Response {
 	from := strVal(req.Args, "from")
 	if from == "" {
-		return errorResponse(CodeError, "missing_from", "set KOPOS_NAME or pass --as", "from required", nil)
+		return errorResponse(CodeError, "missing_from", "set LALIA_NAME or pass --as", "from required", nil)
 	}
 
 	s.mu.Lock()
 	a := s.agentByName(from)
 	if a == nil {
 		s.mu.Unlock()
-		return errorResponse(CodeUnauthorized, "not_registered", "run kopos register", "not registered: "+from, map[string]any{"from": from})
+		return errorResponse(CodeUnauthorized, "not_registered", "run lalia register", "not registered: "+from, map[string]any{"from": from})
 	}
 	if a.Role != "supervisor" {
 		s.mu.Unlock()
@@ -626,7 +626,7 @@ func (s *State) opTaskPublish(req Request) Response {
 	wsRaw, _ := req.Args["workstreams"].([]any)
 
 	if from == "" {
-		return errorResponse(CodeError, "missing_from", "set KOPOS_NAME or pass --as", "from required", nil)
+		return errorResponse(CodeError, "missing_from", "set LALIA_NAME or pass --as", "from required", nil)
 	}
 	if pid == "" {
 		return errorResponse(CodeError, "missing_project", "include project in publish payload", "project required", nil)
@@ -705,7 +705,7 @@ func (s *State) opTaskPublish(req Request) Response {
 	a := s.agentByName(from)
 	if a == nil {
 		s.mu.Unlock()
-		return errorResponse(CodeUnauthorized, "not_registered", "run kopos register", "not registered: "+from, map[string]any{"from": from})
+		return errorResponse(CodeUnauthorized, "not_registered", "run lalia register", "not registered: "+from, map[string]any{"from": from})
 	}
 	if a.Role != "supervisor" {
 		s.mu.Unlock()
@@ -831,14 +831,14 @@ func (s *State) opTaskPublish(req Request) Response {
 
 // opTaskUnassign clears the owner of a slug and resets status to open.
 // The slug's room stays live so reassignees can inherit the conversation;
-// supervisors can close it later with `kopos rooms gc`. Supervisor only.
+// supervisors can close it later with `lalia rooms gc`. Supervisor only.
 func (s *State) opTaskUnassign(req Request) Response {
 	from := strVal(req.Args, "from")
 	slug := strVal(req.Args, "slug")
 	pid := strVal(req.Args, "project")
 
 	if from == "" {
-		return errorResponse(CodeError, "missing_from", "set KOPOS_NAME or pass --as", "from required", nil)
+		return errorResponse(CodeError, "missing_from", "set LALIA_NAME or pass --as", "from required", nil)
 	}
 	if slug == "" {
 		return errorResponse(CodeError, "missing_slug", "provide the slug to unassign", "slug required", nil)
@@ -860,7 +860,7 @@ func (s *State) opTaskUnassign(req Request) Response {
 	t := findTask(tl, slug)
 	if t == nil {
 		s.mu.Unlock()
-		return errorResponse(CodeNotFound, "slug_not_found", "check kopos task show for available slugs", "slug not found: "+slug, map[string]any{"slug": slug})
+		return errorResponse(CodeNotFound, "slug_not_found", "check lalia task show for available slugs", "slug not found: "+slug, map[string]any{"slug": slug})
 	}
 	t.Owner = ""
 	t.Status = statusOpen
@@ -882,7 +882,7 @@ func (s *State) opTaskReassign(req Request) Response {
 	pid := strVal(req.Args, "project")
 
 	if from == "" {
-		return errorResponse(CodeError, "missing_from", "set KOPOS_NAME or pass --as", "from required", nil)
+		return errorResponse(CodeError, "missing_from", "set LALIA_NAME or pass --as", "from required", nil)
 	}
 	if slug == "" || newOwner == "" {
 		return errorResponse(CodeError, "missing_params", "provide slug and owner", "slug and owner required", map[string]any{"slug": slug, "owner": newOwner})
@@ -908,7 +908,7 @@ func (s *State) opTaskReassign(req Request) Response {
 	t := findTask(tl, slug)
 	if t == nil {
 		s.mu.Unlock()
-		return errorResponse(CodeNotFound, "slug_not_found", "check kopos task show for available slugs", "slug not found: "+slug, map[string]any{"slug": slug})
+		return errorResponse(CodeNotFound, "slug_not_found", "check lalia task show for available slugs", "slug not found: "+slug, map[string]any{"slug": slug})
 	}
 	oldOwner := t.Owner
 	t.Owner = newOwner
@@ -941,7 +941,7 @@ func (s *State) opTaskStatus(req Request) Response {
 	pid := strVal(req.Args, "project")
 
 	if from == "" {
-		return errorResponse(CodeError, "missing_from", "set KOPOS_NAME or pass --as", "from required", nil)
+		return errorResponse(CodeError, "missing_from", "set LALIA_NAME or pass --as", "from required", nil)
 	}
 	if slug == "" || status == "" {
 		return errorResponse(CodeError, "missing_params", "provide slug and status", "slug and status required", nil)
@@ -959,7 +959,7 @@ func (s *State) opTaskStatus(req Request) Response {
 	t := findTask(tl, slug)
 	if t == nil {
 		s.mu.Unlock()
-		return errorResponse(CodeNotFound, "slug_not_found", "check kopos task show for available slugs", "slug not found: "+slug, map[string]any{"slug": slug})
+		return errorResponse(CodeNotFound, "slug_not_found", "check lalia task show for available slugs", "slug not found: "+slug, map[string]any{"slug": slug})
 	}
 	isSupervisor := tl.Supervisor == from
 	isOwner := t.Owner == from
@@ -997,7 +997,7 @@ func (s *State) opTaskClaim(req Request) Response {
 	pid := strVal(req.Args, "project")
 
 	if from == "" {
-		return errorResponse(CodeError, "missing_from", "set KOPOS_NAME or pass --as", "from required", nil)
+		return errorResponse(CodeError, "missing_from", "set LALIA_NAME or pass --as", "from required", nil)
 	}
 	if slug == "" {
 		return errorResponse(CodeError, "missing_slug", "provide the slug to claim", "slug required", nil)
@@ -1015,7 +1015,7 @@ func (s *State) opTaskClaim(req Request) Response {
 	t := findTask(tl, slug)
 	if t == nil {
 		s.mu.Unlock()
-		return errorResponse(CodeNotFound, "slug_not_found", "check kopos task bulletin for open slugs", "slug not found: "+slug, map[string]any{"slug": slug})
+		return errorResponse(CodeNotFound, "slug_not_found", "check lalia task bulletin for open slugs", "slug not found: "+slug, map[string]any{"slug": slug})
 	}
 	if t.Status != statusOpen {
 		s.mu.Unlock()
@@ -1076,7 +1076,7 @@ func (s *State) opTaskShow(req Request) Response {
 		t := findTask(tl, slug)
 		s.mu.Unlock()
 		if t == nil {
-			return errorResponse(CodeNotFound, "slug_not_found", "check kopos task bulletin for available slugs", "slug not found: "+slug, map[string]any{"slug": slug})
+			return errorResponse(CodeNotFound, "slug_not_found", "check lalia task bulletin for available slugs", "slug not found: "+slug, map[string]any{"slug": slug})
 		}
 		return Response{OK: true, Data: taskToMap(*t)}
 	}
@@ -1088,7 +1088,7 @@ func (s *State) opTaskShow(req Request) Response {
 func (s *State) opTaskList(req Request) Response {
 	from := strVal(req.Args, "from")
 	if from == "" {
-		return errorResponse(CodeError, "missing_from", "set KOPOS_NAME or pass --as", "from required", nil)
+		return errorResponse(CodeError, "missing_from", "set LALIA_NAME or pass --as", "from required", nil)
 	}
 
 	s.mu.Lock()
@@ -1119,7 +1119,7 @@ func (s *State) opTaskBulletin(req Request) Response {
 	from := strVal(req.Args, "from")
 	pid := strVal(req.Args, "project")
 	if from == "" {
-		return errorResponse(CodeError, "missing_from", "set KOPOS_NAME or pass --as", "from required", nil)
+		return errorResponse(CodeError, "missing_from", "set LALIA_NAME or pass --as", "from required", nil)
 	}
 	if pid == "" {
 		return errorResponse(CodeError, "missing_project", "provide --project or run from a git repo", "project required", nil)
@@ -1223,7 +1223,7 @@ func worktreeIsClean(worktree string) (bool, string) {
 // opTaskUnpublish retracts a published task. Supervisor-only.
 //
 // Default behavior removes the task row and archives the room. It does
-// NOT touch the worktree kopos created — worktrees often hold a live
+// NOT touch the worktree lalia created — worktrees often hold a live
 // agent's cwd, so wiping them is opt-in via --wipe-worktree.
 //
 // Safety gates (any refusal fails the whole call; no half-executed state):
@@ -1248,7 +1248,7 @@ func (s *State) opTaskUnpublish(req Request) Response {
 	evictOwner, _ := req.Args["evict_owner"].(bool)
 
 	if from == "" {
-		return errorResponse(CodeError, "missing_from", "set KOPOS_NAME or pass --as", "from required", nil)
+		return errorResponse(CodeError, "missing_from", "set LALIA_NAME or pass --as", "from required", nil)
 	}
 	if slug == "" {
 		return errorResponse(CodeError, "missing_slug", "provide the slug to unpublish", "slug required", nil)
@@ -1270,7 +1270,7 @@ func (s *State) opTaskUnpublish(req Request) Response {
 	t := findTask(tl, slug)
 	if t == nil {
 		s.mu.Unlock()
-		return errorResponse(CodeNotFound, "slug_not_found", "check kopos task show for available slugs", "slug not found: "+slug, map[string]any{"slug": slug})
+		return errorResponse(CodeNotFound, "slug_not_found", "check lalia task show for available slugs", "slug not found: "+slug, map[string]any{"slug": slug})
 	}
 	taskCopy := *t
 	repoRoot := tl.RepoRoot
@@ -1413,7 +1413,7 @@ func (s *State) opTaskHandoff(req Request) Response {
 	pid := strVal(req.Args, "project")
 
 	if from == "" {
-		return errorResponse(CodeError, "missing_from", "set KOPOS_NAME or pass --as", "from required", nil)
+		return errorResponse(CodeError, "missing_from", "set LALIA_NAME or pass --as", "from required", nil)
 	}
 	if newSup == "" {
 		return errorResponse(CodeError, "missing_to", "provide the new supervisor's agent name", "to required", nil)

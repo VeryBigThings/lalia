@@ -18,7 +18,7 @@ func runDaemon() {
 	// singleton: if a responsive daemon already listens, exit quietly.
 	if c, err := net.Dial("unix", socketPath()); err == nil {
 		c.Close()
-		fmt.Fprintln(os.Stderr, "another kopos daemon is already running")
+		fmt.Fprintln(os.Stderr, "another lalia daemon is already running")
 		os.Exit(0)
 	}
 	if err := os.WriteFile(pidPath(), []byte(fmt.Sprintf("%d\n", os.Getpid())), 0600); err != nil {
@@ -55,7 +55,7 @@ func runDaemon() {
 		l.Close()
 	}()
 
-	fmt.Fprintf(os.Stderr, "kopos daemon pid=%d socket=%s workspace=%s\n", os.Getpid(), socketPath(), workspacePath())
+	fmt.Fprintf(os.Stderr, "lalia daemon pid=%d socket=%s workspace=%s\n", os.Getpid(), socketPath(), workspacePath())
 
 	for {
 		conn, err := l.Accept()

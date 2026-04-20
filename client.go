@@ -97,13 +97,13 @@ func callerName(args []string) string {
 	if v := parseFlag(args, "--as"); v != "" {
 		return v
 	}
-	return os.Getenv("KOPOS_NAME")
+	return os.Getenv("LALIA_NAME")
 }
 
 func mustCaller(args []string) string {
 	from := callerName(args)
 	if from == "" {
-		fmt.Fprintln(os.Stderr, "caller identity required (KOPOS_NAME or --as)")
+		fmt.Fprintln(os.Stderr, "caller identity required (LALIA_NAME or --as)")
 		os.Exit(1)
 	}
 	return from
@@ -112,10 +112,10 @@ func mustCaller(args []string) string {
 func cmdRegister(args []string) {
 	name := parseFlag(args, "--name")
 	if name == "" {
-		name = os.Getenv("KOPOS_NAME")
+		name = os.Getenv("LALIA_NAME")
 	}
 	if name == "" {
-		fmt.Fprintln(os.Stderr, "--name or KOPOS_NAME required")
+		fmt.Fprintln(os.Stderr, "--name or LALIA_NAME required")
 		os.Exit(1)
 	}
 
@@ -243,13 +243,13 @@ func cmdRoomsGC(args []string) {
 
 func cmdRoom(args []string) {
 	if len(args) < 1 {
-		fmt.Fprintln(os.Stderr, "usage: kopos room create <name> [--desc <text>]")
+		fmt.Fprintln(os.Stderr, "usage: lalia room create <name> [--desc <text>]")
 		os.Exit(1)
 	}
 	switch args[0] {
 	case "create":
 		if len(args) < 2 {
-			fmt.Fprintln(os.Stderr, "usage: kopos room create <name> [--desc <text>]")
+			fmt.Fprintln(os.Stderr, "usage: lalia room create <name> [--desc <text>]")
 			os.Exit(1)
 		}
 		from := mustCaller(args)
@@ -267,7 +267,7 @@ func cmdRoom(args []string) {
 
 func cmdJoin(args []string) {
 	if len(args) < 1 {
-		fmt.Fprintln(os.Stderr, "usage: kopos join <room>")
+		fmt.Fprintln(os.Stderr, "usage: lalia join <room>")
 		os.Exit(1)
 	}
 	from := mustCaller(args)
@@ -277,7 +277,7 @@ func cmdJoin(args []string) {
 
 func cmdLeave(args []string) {
 	if len(args) < 1 {
-		fmt.Fprintln(os.Stderr, "usage: kopos leave <room>")
+		fmt.Fprintln(os.Stderr, "usage: lalia leave <room>")
 		os.Exit(1)
 	}
 	from := mustCaller(args)
@@ -287,7 +287,7 @@ func cmdLeave(args []string) {
 
 func cmdParticipants(args []string) {
 	if len(args) < 1 {
-		fmt.Fprintln(os.Stderr, "usage: kopos participants <room>")
+		fmt.Fprintln(os.Stderr, "usage: lalia participants <room>")
 		os.Exit(1)
 	}
 	from := mustCaller(args)
@@ -304,7 +304,7 @@ func cmdParticipants(args []string) {
 
 func cmdPost(args []string) {
 	if len(args) < 2 {
-		fmt.Fprintln(os.Stderr, "usage: kopos post <room> <msg>")
+		fmt.Fprintln(os.Stderr, "usage: lalia post <room> <msg>")
 		os.Exit(1)
 	}
 	from := mustCaller(args)
@@ -316,11 +316,11 @@ func cmdPost(args []string) {
 	})
 }
 
-// cmdTell: kopos tell <peer> <msg>
+// cmdTell: lalia tell <peer> <msg>
 // Fire-and-forget. Returns immediately.
 func cmdTell(args []string) {
 	if len(args) < 2 {
-		fmt.Fprintln(os.Stderr, "usage: kopos tell <peer> <msg>")
+		fmt.Fprintln(os.Stderr, "usage: lalia tell <peer> <msg>")
 		os.Exit(1)
 	}
 	from := mustCaller(args)
@@ -332,12 +332,12 @@ func cmdTell(args []string) {
 	})
 }
 
-// cmdAsk: kopos ask <peer> <msg> [--timeout N]
+// cmdAsk: lalia ask <peer> <msg> [--timeout N]
 // Client-side composition: tell + read. Sends, then blocks up to timeout
 // waiting for a reply from the same peer.
 func cmdAsk(args []string) {
 	if len(args) < 2 {
-		fmt.Fprintln(os.Stderr, "usage: kopos ask <peer> <msg> [--timeout N]")
+		fmt.Fprintln(os.Stderr, "usage: lalia ask <peer> <msg> [--timeout N]")
 		os.Exit(1)
 	}
 	from := mustCaller(args)
@@ -362,12 +362,12 @@ func cmdAsk(args []string) {
 	})
 }
 
-// cmdRead: kopos read <target> [--room] [--timeout N]
+// cmdRead: lalia read <target> [--room] [--timeout N]
 // Consumes oldest pending message. target is a peer by default; pass --room
 // to read from a room with the same name instead.
 func cmdRead(args []string) {
 	if len(args) < 1 {
-		fmt.Fprintln(os.Stderr, "usage: kopos read <peer|room> [--room] [--timeout N]")
+		fmt.Fprintln(os.Stderr, "usage: lalia read <peer|room> [--room] [--timeout N]")
 		os.Exit(1)
 	}
 	from := mustCaller(args)
@@ -398,10 +398,10 @@ func cmdRead(args []string) {
 	})
 }
 
-// cmdPeek: kopos peek <target> [--room]
+// cmdPeek: lalia peek <target> [--room]
 func cmdPeek(args []string) {
 	if len(args) < 1 {
-		fmt.Fprintln(os.Stderr, "usage: kopos peek <peer|room> [--room]")
+		fmt.Fprintln(os.Stderr, "usage: lalia peek <peer|room> [--room]")
 		os.Exit(1)
 	}
 	from := mustCaller(args)
@@ -432,7 +432,7 @@ func cmdPeek(args []string) {
 	})
 }
 
-// cmdReadAny: kopos read-any [--timeout N]
+// cmdReadAny: lalia read-any [--timeout N]
 // Blocks until any channel or room delivers a message to the caller.
 // Prints the source kind+target on the first line, body on subsequent lines.
 func cmdReadAny(args []string) {
@@ -446,7 +446,7 @@ func cmdReadAny(args []string) {
 	})
 }
 
-// cmdChannels: kopos channels — list caller's peer-pair channels.
+// cmdChannels: lalia channels — list caller's peer-pair channels.
 func cmdChannels(args []string) {
 	from := mustCaller(args)
 	resp, err := request("channels", map[string]any{"from": from})
@@ -459,10 +459,10 @@ func cmdChannels(args []string) {
 	})
 }
 
-// cmdHistory: kopos history <target> [--room] [--since N] [--limit N]
+// cmdHistory: lalia history <target> [--room] [--since N] [--limit N]
 func cmdHistory(args []string) {
 	if len(args) < 1 {
-		fmt.Fprintln(os.Stderr, "usage: kopos history <peer|room> [--room] [--since N] [--limit N]")
+		fmt.Fprintln(os.Stderr, "usage: lalia history <peer|room> [--room] [--since N] [--limit N]")
 		os.Exit(1)
 	}
 	from := mustCaller(args)
@@ -497,7 +497,7 @@ func cmdHistory(args []string) {
 // caller's git environment unless --project is specified explicitly.
 func cmdTask(args []string) {
 	if len(args) < 1 {
-		fmt.Fprintln(os.Stderr, "usage: kopos task <publish|bulletin|claim|status|unassign|reassign|unpublish|show|list|handoff>")
+		fmt.Fprintln(os.Stderr, "usage: lalia task <publish|bulletin|claim|status|unassign|reassign|unpublish|show|list|handoff>")
 		os.Exit(1)
 	}
 	sub := args[0]
@@ -588,7 +588,7 @@ func cmdTask(args []string) {
 
 	case "claim":
 		if len(rest) < 1 || rest[0] == "" || rest[0][0] == '-' {
-			fmt.Fprintln(os.Stderr, "usage: kopos task claim <slug> [--project <id>]")
+			fmt.Fprintln(os.Stderr, "usage: lalia task claim <slug> [--project <id>]")
 			os.Exit(1)
 		}
 		slug := rest[0]
@@ -605,7 +605,7 @@ func cmdTask(args []string) {
 
 	case "status":
 		if len(rest) < 2 {
-			fmt.Fprintln(os.Stderr, "usage: kopos task status <slug> <in-progress|ready|blocked|merged> [--project <id>]")
+			fmt.Fprintln(os.Stderr, "usage: lalia task status <slug> <in-progress|ready|blocked|merged> [--project <id>]")
 			os.Exit(1)
 		}
 		slug, status := rest[0], rest[1]
@@ -619,7 +619,7 @@ func cmdTask(args []string) {
 
 	case "unassign":
 		if len(rest) < 1 || rest[0] == "" || rest[0][0] == '-' {
-			fmt.Fprintln(os.Stderr, "usage: kopos task unassign <slug> [--project <id>]")
+			fmt.Fprintln(os.Stderr, "usage: lalia task unassign <slug> [--project <id>]")
 			os.Exit(1)
 		}
 		slug := rest[0]
@@ -633,7 +633,7 @@ func cmdTask(args []string) {
 
 	case "reassign":
 		if len(rest) < 2 {
-			fmt.Fprintln(os.Stderr, "usage: kopos task reassign <slug> <agent> [--project <id>]")
+			fmt.Fprintln(os.Stderr, "usage: lalia task reassign <slug> <agent> [--project <id>]")
 			os.Exit(1)
 		}
 		slug, owner := rest[0], rest[1]
@@ -647,7 +647,7 @@ func cmdTask(args []string) {
 
 	case "unpublish":
 		if len(rest) < 1 || rest[0] == "" || rest[0][0] == '-' {
-			fmt.Fprintln(os.Stderr, "usage: kopos task unpublish <slug> [--force] [--wipe-worktree] [--evict-owner] [--project <id>]")
+			fmt.Fprintln(os.Stderr, "usage: lalia task unpublish <slug> [--force] [--wipe-worktree] [--evict-owner] [--project <id>]")
 			os.Exit(1)
 		}
 		slug := rest[0]
@@ -715,7 +715,7 @@ func cmdTask(args []string) {
 
 	case "handoff":
 		if len(rest) < 1 || rest[0] == "" || rest[0][0] == '-' {
-			fmt.Fprintln(os.Stderr, "usage: kopos task handoff <new-supervisor> [--project <id>]")
+			fmt.Fprintln(os.Stderr, "usage: lalia task handoff <new-supervisor> [--project <id>]")
 			os.Exit(1)
 		}
 		newSup := rest[0]
@@ -749,7 +749,7 @@ func cmdStop(_ []string) {
 
 func cmdInit(args []string) {
 	if len(args) != 1 {
-		fmt.Fprintln(os.Stderr, "usage: kopos init <worker|supervisor>")
+		fmt.Fprintln(os.Stderr, "usage: lalia init <peer|worker|supervisor>")
 		os.Exit(1)
 	}
 	prompt, err := promptForRole(args[0])
@@ -762,7 +762,7 @@ func cmdInit(args []string) {
 
 func cmdPrompt(args []string) {
 	if len(args) != 1 {
-		fmt.Fprintln(os.Stderr, "usage: kopos prompt <worker|supervisor>")
+		fmt.Fprintln(os.Stderr, "usage: lalia prompt <peer|worker|supervisor>")
 		os.Exit(1)
 	}
 	prompt, err := promptForRole(args[0])
@@ -775,7 +775,7 @@ func cmdPrompt(args []string) {
 
 func cmdRun(args []string) {
 	if len(args) < 2 {
-		fmt.Fprintln(os.Stderr, "usage: kopos run <worker|supervisor> --claude-code|--codex|--copilot [--force] [args...]")
+		fmt.Fprintln(os.Stderr, "usage: lalia run <peer|worker|supervisor> --claude-code|--codex|--copilot [--force] [args...]")
 		os.Exit(1)
 	}
 

@@ -28,10 +28,10 @@ func ensureWorkspace() error {
 			return fmt.Errorf("git init: %s: %w", string(out), err)
 		}
 		// set a default identity if user has none at repo level; harmless if already set globally
-		_ = exec.Command("git", "-C", ws, "config", "user.email", "daemon@kopos.local").Run()
-		_ = exec.Command("git", "-C", ws, "config", "user.name", "kopos").Run()
+		_ = exec.Command("git", "-C", ws, "config", "user.email", "daemon@lalia.local").Run()
+		_ = exec.Command("git", "-C", ws, "config", "user.name", "lalia").Run()
 
-		readme := []byte("# kopos workspace\n\nAgent coordination log. Managed by the kopos daemon.\n")
+		readme := []byte("# lalia workspace\n\nAgent coordination log. Managed by the lalia daemon.\n")
 		if err := os.WriteFile(filepath.Join(ws, "README.md"), readme, 0600); err != nil {
 			return err
 		}

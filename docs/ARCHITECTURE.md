@@ -1,202 +1,259 @@
-# Kopos — Architecture
+# Lalia — Architecture
 
 ## Purpose
 
-A CLI that lets coding agents (Claude Code, Codex, Cursor, Aider, etc.) coordinate across processes. Two transports over one identity and storage layer:
+A CLI that lets coding agents (Claude Code, Codex, Copilot, Cursor,
+Aider, etc.) coordinate across processes. Two transports over one
+identity and storage layer:
 
-- **Tunnel** — synchronous two-party channel. Send blocks until peer replies. TCP-like.
-- **Room** — asynchronous N-party channel. Post, return immediately. Subscribers pick up on next turn. Pub/sub over a persistent log.
+- **Room** — N-party pub/sub with explicit membership and bounded
+  mailboxes. The default surface for feature/workstream coordination.
+- **Channel** — 1:1 peer-to-peer messaging. One implicit channel per
+  unordered pair.
 
-Every message is signed, ordered, and committed to a git-backed log. Conversations survive restarts. Identity of each participant is explicit and verifiable.
+Every message is signed, ordered, and committed to a git-backed log.
+Mailboxes persist in SQLite so daemon restart does not lose
+undelivered messages. Identity of each participant is explicit and
+verifiable.
 
 ## Scope
 
 **In**
-- Agent registry with harness/model/project/cwd metadata.
-- Per-agent signing keys.
+- Agent registry with harness/model/project/worktree/branch/role
+  metadata, keyed by ULID `agent_id`.
+- Per-agent Ed25519 signing keys; signed envelopes on every
+  authenticated op.
 - Local multi-agent coordination on a single machine.
-- Git-backed durable log for both transports.
-- Lazy-spawned background broker.
+- Git-backed durable transcripts for both transports.
+- SQLite write queue + mailbox sidecar for crash-safe delivery and
+  daemon-restart survival.
+- Supervisor/worker task primitive (publish/claim/status).
+- Harness bootstrap helpers (`init` / `prompt` / `run`).
+- Lazy-spawned background daemon.
 
-**Out (for MVP)**
-- Orchestration (driving agents programmatically — different product).
-- Cross-machine transport (add later via git remote on the log repo).
-- Harness-specific adapters (kopos is harness-agnostic; harnesses integrate via their config files).
-- Authorization policy beyond "signature valid" (trust model is single-user local).
+**Out**
+- Orchestration (driving agents programmatically). `task spawn` is
+  designed but not shipped; when it lands it will be a narrow
+  per-slug lifecycle wrapper, not a general orchestrator.
+- Cross-machine transport (add later via git remote on the workspace).
+- Harness-specific adapters beyond the three `run` wrappers. Lalia
+  stays harness-agnostic; new harnesses integrate via their own
+  instruction files.
+- Authorization policy beyond "signature valid" + role gating on a
+  small number of task mutations. Trust model is single-user local.
 
 ## Transports
 
-### Room (async, pub/sub)
+### Room (N-party)
 
-- Any agent can `join`, `post`, `inbox`, `leave`.
-- `post` appends a message and returns immediately. No blocking.
-- `inbox` returns messages newer than the caller's read cursor for that room and advances the cursor.
-- Total message order within a room is git commit order.
-- Any number of participants. Delivery is guaranteed by persistence — an agent that joins later and calls `history` sees everything.
+- Explicit membership: `room create`, `join`, `leave`. Max 8 members
+  by design.
+- `post` appends a message and enqueues it into every other member's
+  bounded mailbox; returns `room/seq`.
+- `read <room> --room` drains every pending message for the caller
+  from that room. Blocks up to `--timeout` for the first arrival when
+  the mailbox is empty.
+- `peek <room> --room` inspects without draining.
+- Overflow policy: per-subscriber mailbox is bounded; when full the
+  oldest message is dropped and the subscriber sees a "N dropped"
+  notice on their next read.
+- Total message order within a room is git commit order; ULID
+  sequencing ensures per-sender FIFO.
+- Git transcript: `rooms/<name>/<NNNNNN>-<from>.md`.
 
-### Tunnel (sync, two-party)
+### Channel (1:1)
 
-- `tunnel <peer>` initiates a session. Both endpoints register with the broker and turn state is initialized.
-- `send` appends a message, commits, and blocks until peer replies or timeout.
-- `await` blocks until peer sends.
-- Turn discipline is broker-enforced: out-of-turn calls return an error, never hang.
-- Tool-call timeout is the hard wall. Long waits return a resumable handle: `kopos resume <sid>` re-enters the wait.
-- `close` tears down the session; peer's blocking call returns with `peer_closed`.
+- One channel per unordered peer pair. No explicit open or close —
+  the first `tell`/`ask`/`read` materializes it.
+- `tell <peer>` enqueues a one-way message into the peer's mailbox
+  and returns immediately.
+- `ask <peer> "..." --timeout N` enqueues a message and blocks up to
+  timeout for the peer's next message on this channel.
+- `read <peer>` drains the next inbound.
+- `read-any` blocks on the next inbound from any channel or room the
+  caller is a member of.
+- Git transcript: `peers/<lo>--<hi>/<NNNNNN>-<from>.md` (lexicographic
+  peer ordering keeps transcripts single-directoried per pair).
+
+No turn FSM. No session id. No open/close handshake. The previous
+tunnel model (`send`/`await`/`close`/`sid`) was removed; see
+[CHANNELS.md](./CHANNELS.md) for the historical rationale.
 
 ## Components
 
 ```
 ┌─────────────────────────────────────────────────────────┐
-│ Agent process (Claude Code / Codex / Cursor / Aider …)  │
-│   └─ shells out to: kopos <subcommand>                 │
+│ Agent process (Claude Code / Codex / Copilot / Cursor …)│
+│   └─ shells out to: lalia <subcommand>                  │
 └─────────────┬───────────────────────────────────────────┘
-              │ unix socket: ~/.kopos/sock
+              │ unix socket: ~/.lalia/sock
               ▼
 ┌─────────────────────────────────────────────────────────┐
-│ kopos daemon (lazy-spawned, per-user)                  │
-│   ├─ registry cache (in-memory, backed by git)          │
-│   ├─ tunnel session table (in-memory)                   │
-│   ├─ turn-state FSM per tunnel                          │
-│   ├─ pending-waiter table (socket fds blocked on send/  │
-│   │   await)                                            │
-│   ├─ write queue (SQLite at ~/.kopos/queue.db, WAL)    │
-│   └─ single writer goroutine → kopos git repo          │
+│ lalia daemon (lazy-spawned, per-user)                   │
+│   ├─ registry cache (in-memory + git-backed JSON)       │
+│   ├─ rooms: members, bounded mailboxes, waiters         │
+│   ├─ channels: per-pair log + mailbox + waiter          │
+│   ├─ write queue + mailbox persistence (SQLite, WAL)    │
+│   ├─ single writer goroutine → lalia git repo           │
+│   └─ task list (per-project JSON in workspace)          │
 └─────────────┬───────────────────────────────────────────┘
               │ writes files + commits
               ▼
 ┌─────────────────────────────────────────────────────────┐
-│ Workspace: kopos's own git repo (dedicated, not shared │
-│ with any project repo)                                  │
-│   rooms/<name>/<ulid>-from.md                           │
-│   tunnels/<sid>/<ulid>-from.md                          │
-│   registry/<agent_id>.json                              │
-│   cursors/<agent_id>.json                               │
+│ Workspace: lalia's own git repo                         │
+│   registry/*.json                                       │
+│   rooms/<name>/*.md                                     │
+│   peers/<lo>--<hi>/*.md                                 │
+│   tasks/<project-id>/task-list.json                     │
 └─────────────────────────────────────────────────────────┘
 ```
 
-### kopos CLI
+### lalia CLI
 
-Single static binary (Go or Rust). Connects to daemon over unix socket. If no daemon is listening, spawns one and retries with backoff. No user-visible "start" command.
+Single static Go binary. Connects to the daemon over a unix socket.
+If no daemon is listening, spawns one and retries with backoff. No
+user-visible "start" command.
 
-### kopos daemon
+### lalia daemon
 
 - Auto-spawned on first client call.
-- Binds `~/.kopos/sock` (permissions 0600).
-- Holds tunnel state in memory for correctness (no filesystem races on turn state).
-- Persists registry and all messages to kopos's own git repo (the workspace). Never writes to any project repo the agents are working in.
-- Single writer goroutine owns the git index; no concurrent `git` invocations.
-- Write queue persisted to `~/.kopos/queue.db` (SQLite, WAL mode). Client-visible acknowledgment happens only after queue insert; commit to git follows asynchronously.
-- On startup: clear stale `.git/index.lock` only if no live git pid holds it, then replay any queue rows not yet committed.
-- Idle timeout (default 30 min of no clients) → runs `git gc --auto`, then self-exits.
-- `kopos stop` forces shutdown (drains queue first).
+- Binds `~/.lalia/sock` (mode 0600).
+- Holds room/channel state in memory; durable state lives in the git
+  workspace and the SQLite sidecar.
+- Single writer goroutine owns the git index; no concurrent `git`
+  invocations.
+- SQLite at `<workspace>/queue.db` (WAL mode) serves two purposes:
+  write queue (ack-before-commit durability) and mailbox persistence
+  (undelivered room/channel messages survive daemon restart).
+- On startup: `flushPendingWrites` drains the write queue
+  synchronously, then `loadRooms` rebuilds room state from the
+  transcript directory, then `replayMailbox` rehydrates undelivered
+  mailboxes from SQLite.
+- Stale `.git/index.lock` after crash: removed on startup only if no
+  live git pid holds it.
+- `lalia stop` forces shutdown (drains queue first).
 
-### Workspace (kopos's own git repo)
+### Workspace
 
-Default: `~/.kopos/workspace/` — a git repo owned by kopos, initialized on first use. `main` branch, no special branching scheme required.
+Default: `~/.local/state/lalia/workspace/` — a git repo owned by
+lalia, initialized on first use. `main` branch, no special branching
+scheme.
 
-Override: `KOPOS_WORKSPACE=/path/to/another/kopos/repo` or `--workspace` flag. The override must point at a repo that kopos owns (either one it initialized, or an empty repo). **Never point the workspace at a project repo the agents are also working in.** Kopos is a separate tool with its own history; co-locating with project code was considered and rejected — it leaks tool state into project history and creates cross-writer contention.
+Override: `LALIA_WORKSPACE=/path/to/another/lalia/repo`. The override
+must point at a repo that lalia owns (either one it initialized or an
+empty repo). **Never point the workspace at a project repo the
+agents are also working in.** Lalia is a separate tool with its own
+history; co-locating leaks tool state into project history and
+creates cross-writer contention.
 
-All persistent state — rooms, tunnels, registry, cursors, messages — lives inside this repo. The only sidecar is the write queue at `~/.kopos/queue.db` (SQLite, WAL). In-memory state in the daemon: turn FSM, blocked waiters, registry cache.
+Durable state: registry, rooms, channels, tasks, message transcripts.
+Sidecar SQLite holds only the write queue + mailbox rows. In-memory
+state in the daemon: mailboxes (mirrored to SQLite), blocked waiters,
+registry cache.
 
-Cross-machine sync is a normal git remote on this repo: `git remote add origin …` and push/pull like any repo. Kopos does not manage remotes; the user does.
+Cross-machine sync is a normal git remote on this repo. Lalia does
+not manage remotes; the user does.
 
 ## Identity and registry
 
 On first invocation in a session, an agent calls:
 
 ```
-kopos register \
-  --name claude-opus-4-7 \
-  --harness claude-code \
-  --model claude-opus-4-7
+lalia register \
+  [--name <name>] \
+  [--harness <harness>] \
+  [--model <model>] \
+  [--project <project>] \
+  [--role supervisor|worker]
 ```
 
-Most metadata is auto-detected from the agent's cwd. Explicit flags override detection.
+`--name` defaults to `$LALIA_NAME`. Most metadata is auto-detected
+from the agent's cwd.
 
-### Project resolution
+### Identity record
 
-Project identity is the **repo**, not the checkout directory. Multiple worktrees of the same repo resolve to the same project so agents coordinate across branches without configuration.
+The canonical identifier is a ULID `agent_id` generated at first
+register and stable across re-registrations under the same name.
 
-Resolution order:
-
-1. `--project <name>` flag, if passed.
-2. `git config --get remote.origin.url` from cwd; take the last path segment, strip `.git`. Worktrees inherit the master's remote config, so every worktree of the same repo produces the same project name.
-3. `basename $(dirname $(git rev-parse --git-common-dir))` — the master repo's directory name. Used when the repo has no remote (e.g., the Obolos `forum/` repo has none by default).
-4. `basename $PWD` — final fallback for a non-git cwd.
-
-### Worktree and branch capture
-
-Registration also captures:
-- `cwd` — the full path the agent is running from (a worktree path, typically).
-- `worktree` — basename of cwd.
-- `branch` — `git rev-parse --abbrev-ref HEAD`.
-
-These are metadata, not part of the project key. Two Claude Code sessions on `obolos` — one in `Obolos-web`, one in `Obolos-quant` — register under the same project `obolos` with different `worktree`/`branch` values.
-
-### Registry record
+Registry record:
 
 ```json
 {
   "agent_id": "01HX...",
-  "name": "claude-opus-4-7",
+  "name": "alice",
   "harness": "claude-code",
   "model": "claude-opus-4-7",
-  "project": "obolos",
-  "repo_url": "git@github.com:foo/obolos.git",
-  "cwd": "/Users/neektza/Obolos/Obolos-web",
-  "worktree": "Obolos-web",
-  "branch": "web",
+  "project": "lalia",
+  "repo_root": "/Users/neektza/Code/lalia",
+  "worktree": "lalia",
+  "branch": "main",
+  "role": "worker",
   "pubkey": "ed25519:...",
-  "registered_at": "2026-04-17T10:32:00Z"
+  "registered_at": "2026-04-19T10:32:00Z",
+  "last_seen_at": "2026-04-19T10:45:14Z"
 }
 ```
 
-### Daemon steps on `register`
+See [IDENTITY.md](./IDENTITY.md) for the resolver grammar (`<name>`,
+`<name>@<project>`, `<name>@<project>:<branch>`, ULID, nickname).
 
-1. Resolve project, worktree, branch (as above).
-2. Generate Ed25519 keypair.
-3. Write `registry/<agent_id>.json` and commit.
-4. Store private key at `~/.kopos/keys/<agent_id>.key` (0600).
-5. Return `agent_id` and a short-lived session token (exported as `KOPOS_TOKEN`).
+### Project resolution
 
-Every subsequent CLI call includes the token. Daemon verifies token, signs outgoing messages with the agent's private key, writes the signed envelope.
+Project identity is the **repo**, not the checkout directory.
+Multiple worktrees of the same repo resolve to the same project.
 
-### Display names
+Resolution order:
+1. `--project <name>` flag, if passed.
+2. `git config --get remote.origin.url` from cwd, slugified.
+3. `basename` of the main worktree's parent — used when the repo has
+   no remote.
+4. Empty `project` when cwd is not inside a git repo. Such agents
+   participate in channels and explicit-`--project` rooms but cannot
+   claim tasks.
 
-`agent_id` (ULID) is canonical. Display name is cosmetic and disambiguates when multiple agents share a `name` within a project: `claude-opus-4-7@web`, `claude-opus-4-7@quant`. Conflict-free display pattern: `<name>@<branch>` if there is any risk of collision, else bare `<name>`.
+### Keys
 
-### Threat model
+- On first register lalia generates an Ed25519 keypair and stores the
+  private key at `~/.lalia/keys/<name>.key` (mode 0600).
+- Re-register with the same name reuses the existing key.
+- `unregister` deletes the private key; a later re-register generates
+  a fresh key (and so a fresh pubkey). Unregister is conceptually
+  terminal.
+- A `keychain` keystore backend (macOS Security framework) is
+  available via `LALIA_KEYSTORE=keychain`, with fallback to the file
+  backend if the keychain is unavailable.
 
-Single-user local machine. Signing catches bugs (one agent accidentally impersonating another), not adversaries. Private keys live unencrypted at rest. Keychain integration is a later pass.
+### Signing and leases
 
-### Presence
+Every authenticated op is signed by the caller's private key. The
+daemon verifies the signature against the registered pubkey; mismatch
+returns exit 6.
 
-Daemon tracks which agents currently hold a live socket connection. `kopos participants <room>` distinguishes *live* (connected) from *registered* (has entry but no active session).
-
-### Session end
-
-`kopos unregister` on agent shutdown. Absent explicit unregister, daemon marks the agent offline after N seconds of socket silence (heartbeat ping).
+Leases run 60 minutes. Any command renews; explicit `lalia renew` is
+a no-op that only renews. An expired lease drops the agent from the
+registry; blocked `read` calls return immediately.
 
 ## Message envelope
 
-Every message — tunnel or room — uses the same envelope. Stored as a file in the workspace repo.
+Stored as a file in the workspace repo. Current fields (simplified):
 
 ```yaml
 ---
-id: 01HX9Z... # ULID
-from: claude-opus-4-7
-to: codex-gpt-5                 # peer for tunnel, room name for room
-channel: tunnel | room
-channel_id: <sid> | <room-name>
-ts: 2026-04-17T10:32:14Z
-reply_to: 01HX9Y...             # optional
-sig: base64(ed25519(...))       # signature over all preceding fields + body
+seq: 42                                  # monotonic within room/channel
+from: alice
+to: bob                                  # peer for channel, room for rooms
+kind: channel | room
+target: <room-name> | <channel-key>
+ts: 2026-04-19T10:32:14Z
+sig: base64(ed25519(...))
 ---
 
 <markdown body>
 ```
 
-Filename: `<ulid>-<from>.md`. ULIDs are time-sortable and collision-free across machines, so two daemons writing to synced workspaces never clash on filenames. Lexicographic ordering of the filename is chronological order. Git history is the audit trail.
+Filename: `<NNNNNN>-<from>.md` under the room or channel directory.
+Within a channel or room sequence number ordering matches git commit
+order.
 
 ## Storage layout
 
@@ -204,178 +261,116 @@ Filename: `<ulid>-<from>.md`. ULIDs are time-sortable and collision-free across 
 <workspace>/
 ├── .git/
 ├── README.md
+├── queue.db                         # SQLite: write queue + mailbox
 ├── registry/
-│   ├── claude-opus-4-7.json        # pubkey + metadata
-│   └── codex-gpt-5.json
-├── cursors/
-│   └── claude-opus-4-7.json        # {room: last-seen-ulid}
+│   └── <agent_id>.json
 ├── rooms/
-│   └── obolos-sync/
-│       ├── ROOM.md                 # description, members, created-by
-│       ├── 01HX9ZA...-claude-opus-4-7.md
-│       ├── 01HX9ZB...-codex-gpt-5.md
-│       └── …
-└── tunnels/
-    └── 01HX9Z-claude-codex/
-        ├── SESSION.md              # peers, opened-at, turn-state at close
-        ├── 01HX9ZC...-claude-opus-4-7.md
-        ├── 01HX9ZD...-codex-gpt-5.md
-        └── …
+│   └── <room-name>/
+│       ├── ROOM.md                  # description
+│       ├── MEMBERS.md               # current members
+│       └── NNNNNN-<from>.md
+├── peers/
+│   └── <lo>--<hi>/                  # unordered pair
+│       └── NNNNNN-<from>.md
+└── tasks/
+    └── <project-id>/
+        └── task-list.json
 ```
 
-Filenames are ULIDs so two daemons on synced workspaces cannot collide. ULIDs sort lexicographically by creation time, so `ls` gives chronological order.
+Sequence numbers are zero-padded for lexicographic sort order. ULIDs
+are still used internally for agent_id and task slugs; per-message
+ordering moved to per-channel/per-room sequence counters.
 
-Commit cadence:
-- Registry changes: immediate commit.
-- Tunnel messages: immediate commit (conversation is short, auditability matters).
-- Room messages: immediate commit by default; `--batch` flag allows N-message batching for high-volume rooms (not MVP).
+**Garbage collection**: supervisor runs `lalia rooms gc` to archive
+rooms for merged tasks; git itself handles packing via `git gc --auto`
+on idle.
 
-Cursor updates: written to working tree on `inbox`, committed at end of session or every M cursor updates (tunable). Avoids one commit per read.
+## Task primitive
 
-**Directory sharding**: not implemented in MVP. When a single room directory crosses ~10k messages and `ls` starts to slow, shard by month: `rooms/<name>/YYYY-MM/<ulid>-from.md`. The daemon can migrate existing flat rooms on a `kopos compact` command. ULID-first naming means sort order is preserved after sharding.
-
-**Garbage collection**: daemon invokes `git gc --auto` on idle-exit. Git itself decides whether to pack; no manual tuning needed at MVP scale.
-
-## Command reference
-
-### Global
-
-| Command | Effect |
-|---|---|
-| `kopos register --name --harness --model [--project]` | Register agent, return token. Project auto-detected from remote URL or master-repo directory; explicit `--project` overrides. Worktree and branch captured automatically. Idempotent per session. |
-| `kopos unregister` | Mark offline, close open sessions, release token. |
-| `kopos whoami` | Print registered identity. |
-| `kopos agents` | List registered agents, live/offline, harness, project. |
-| `kopos stop` | Shut down daemon. |
-
-### Room
-
-| Command | Effect |
-|---|---|
-| `kopos rooms` | List all rooms. |
-| `kopos room create <name> [--desc …]` | Create a new room. |
-| `kopos join <room>` | Subscribe. |
-| `kopos leave <room>` | Unsubscribe. |
-| `kopos participants <room>` | Members; flags live vs offline. |
-| `kopos post <room> "msg"` | Append + commit. Returns message id. |
-| `kopos inbox [<room>]` | Return unread messages across joined rooms (or one room), advance cursor. |
-| `kopos peek <room>` | Like inbox, no cursor advance. |
-| `kopos history <room> [--since id\|ts] [--limit N]` | Full-log read. |
-
-### Tunnel
-
-| Command | Effect |
-|---|---|
-| `kopos tunnel <peer>` | Open a tunnel. Returns session id. Blocks briefly while peer handshakes (or fails fast if peer not live). |
-| `kopos tunnels` | List open tunnels involving this agent. |
-| `kopos send <sid> "msg" [--timeout 300]` | Append, commit, block until peer replies or timeout. Returns reply. |
-| `kopos await <sid> [--timeout 300]` | Block until peer sends. Returns message. |
-| `kopos resume <sid>` | Re-enter wait after a timed-out send/await. |
-| `kopos close <sid>` | Explicit teardown. Peer's pending call returns `peer_closed`. |
-
-### Bridging
-
-| Command | Effect |
-|---|---|
-| `kopos archive <sid> --to <room>` | Post tunnel transcript summary to a room. |
-
-## Lifecycle examples
-
-### Agent session start (Claude Code)
-
-Harness config (`CLAUDE.md`) instructs:
+Per-project task list at `tasks/<project-id>/task-list.json`. Task
+shape:
 
 ```
-On session start, run:
-  kopos register --name claude-opus-4-7 --harness claude-code --model claude-opus-4-7
-  kopos inbox
-On session end, run:
-  kopos unregister
+{slug, branch, brief, owned_paths, contracts, worktree,
+ owner, status, updated_at}
 ```
 
-`register` spawns the daemon if needed, auto-detects project (repo URL → master dir → cwd) plus worktree and branch from cwd, and returns a token. `inbox` returns missed messages from all joined rooms in the resolved project. No explicit `--project` or `--cwd` needed for the common case where the agent is inside a git worktree of the project repo.
+Status ∈ `open | assigned | in-progress | ready | blocked | merged`.
 
-### Room post (async)
+**Supervisor** operations (role-gated):
+- `task publish --file <payload>` — atomically create N worktrees +
+  N rooms + N bundle posts per slug. One slug failing does not block
+  the rest. Republish against the same commit is a no-op.
+- `task unassign`, `task reassign`, `task unpublish`, `task handoff`.
 
-```
-$ kopos post obolos-sync "Budget classifier API discussion updated, see forum/discussions/budgetbot-classifier-api/"
-message_id=01HX9Z...
-```
+**Worker** operations (any role can read):
+- `task bulletin` — list open tasks (discovery).
+- `task claim <slug>` — atomic flip open → in-progress, auto-join
+  the room, returns the bundle.
+- `task status <slug> <state>` — mutate caller's own row.
 
-Commits a file to the workspace and returns. Other agents see it the next time they run `inbox`.
+**Workstream-scoped rooms**: `task publish` creates the slug-named
+room, joins the supervisor, and posts the bundle as the first
+message. `task claim` auto-joins the worker. `task handoff` rewires
+room membership. Setting status to `merged` does not archive the
+room; `lalia rooms gc` is the opt-in cleanup step.
 
-### Tunnel conversation (sync)
-
-Terminal A — Claude Code:
-```
-$ kopos tunnel codex-gpt-5
-session_id=01HXA1-claude-codex
-$ kopos send 01HXA1-claude-codex "Can you review my proposed classifier schema?"
-# blocks …
-# returns: "Looks good, but the category enum needs …"
-```
-
-Terminal B — Codex:
-```
-$ kopos await 01HXA1-claude-codex
-# blocks …
-# returns: "Can you review my proposed classifier schema?"
-$ kopos send 01HXA1-claude-codex "Looks good, but the category enum needs …"
-# blocks on Claude's next reply …
-```
-
-Broker enforces turn order: if Claude calls `send` twice in a row, the second call returns `not_your_turn`.
+**Worktree ownership**: `task publish` shells out to `git worktree
+add` under `<parent-of-repo_root>/wt/<slug>`, with per-repo
+serialization and per-slug rollback on partial failure.
 
 ## Failure modes and mitigations
 
 | Failure | Mitigation |
 |---|---|
-| Tool-call timeout (10 min Bash cap) during long tunnel wait | `send`/`await` return a resumable handle on internal timeout; `resume` re-enters wait. Handle surfaces to the agent, which decides whether to wait again. |
-| Peer dies mid-tunnel | Daemon heartbeats socket connections; dead peer → blocked call returns `peer_disconnected`. |
-| Both sides call `await` simultaneously | Broker detects; both calls return `deadlock_avoided` with current turn-state. |
-| Both sides call `send` simultaneously | First wins, second returns `not_your_turn`. |
-| Daemon crash with open tunnels | Tunnels are persisted to the git log; on restart, daemon reads `tunnels/<sid>/SESSION.md` to reconstruct. Blocked clients reconnect and resume. |
-| Daemon crash between client ack and git commit | Write queue in `~/.kopos/queue.db` (SQLite WAL) persists every message before ack. On restart, daemon replays uncommitted rows onto `kopos/log`. No data loss on messages the client was told succeeded. |
-| Simultaneous commits (two rooms posting at once) | Single writer goroutine serializes commits. No index contention. |
-| Stale `.git/index.lock` after crash | Startup checks for a live git pid holding the lock; if none, removes it. Never force-removes without the check. |
-| Cross-machine filename collision on sync | ULID filenames are globally unique by construction. No collision possible. |
-| Identity collision (two agents pick same `--name` in the same project) | Daemon disambiguates display name with `@<branch>` suffix (`claude-opus-4-7@web` vs `claude-opus-4-7@quant`) if branches differ. Same name, same branch → append a short numeric suffix and warn. `agent_id` (ULID) is the canonical key regardless. |
-| Stale registry entries | `agents --prune` removes entries with no activity for N days. |
+| Daemon crash with pending unread messages | SQLite mailbox persistence (`replayMailbox` at boot) replays undelivered rows. No message lost on restart. |
+| Daemon crash between client ack and git commit | SQLite write queue persists every message before ack; replay on restart. |
+| Simultaneous commits (two rooms posting at once) | Single writer goroutine serializes commits. |
+| Stale `.git/index.lock` after crash | Startup checks for a live git pid; removes only if none. |
+| Cross-machine filename collision on sync | ULID + monotonic seq; per-pair directory keying prevents collision. |
+| Identity collision (two `alice` agents) | `agent_id` (ULID) is canonical. Resolver disambiguates with `@<project>` or `@<project>:<branch>`. |
+| Stale registry entries | 60-minute lease; expired agents drop automatically. |
+| Signature mismatch | Exit 6; daemon refuses the op. |
+| Task publish partial failure | Per-slug rollback; one slug's worktree/room failure does not block sibling slugs. |
 
 ## Design decisions (resolved)
 
-- **Daemon: auto-spawned, not user-managed.** Same pattern as `ssh-agent`. Invisible to users.
-- **Storage: git repo for durability + audit, filesystem for reads, SQLite for hot state.** Git is the write journal, not the query path. Queries scan files; git history is the audit trail.
-- **Kopos owns its own git repo.** Workspace is a dedicated repo at `~/.kopos/workspace/` (override-able). Never co-located with a project repo. Keeps tool state cleanly separated from project history and avoids cross-writer contention entirely.
-- **ULID filenames.** `<ulid>-<from>.md`. Time-sortable, collision-free across machines, so cross-machine sync via `git pull` cannot conflict on filenames.
-- **Persistent write queue.** `~/.kopos/queue.db` (SQLite WAL). Client ack happens on queue insert; commit to git follows. Crash between ack and commit is recoverable — no lost acknowledged messages.
-- **Transport: unix socket, not TCP.** Single-user single-machine assumption. Avoids auth complexity of TCP.
-- **Identity: Ed25519 keypair per agent.** Signing catches mistakes in a trusted local environment.
-- **Turn enforcement: broker, not convention.** Eliminates a class of bugs.
-- **One message envelope for both transports.** Simpler codebase, messages can be moved between channels.
+- **Daemon: auto-spawned, not user-managed.** Same pattern as
+  `ssh-agent`. Invisible to users.
+- **Storage: git repo for durability + audit, filesystem for reads,
+  SQLite for hot state.** Git is the write journal, not the query
+  path. Queries scan files; git history is the audit trail.
+- **Lalia owns its own git repo.** Workspace at
+  `~/.local/state/lalia/workspace/` (override-able). Never co-located
+  with a project repo.
+- **Per-channel/per-room sequence numbers**, not ULID filenames. The
+  earlier ULID filename scheme was dropped when channels replaced
+  tunnels; sequence-numbered filenames are simpler to order and still
+  globally unique within a directory.
+- **Persistent write queue + mailbox.** Client ack happens on SQLite
+  insert; commit to git and delivery to recipient follow. Crash
+  between ack and either action is recoverable.
+- **Transport: unix socket, not TCP.** Single-user single-machine
+  assumption. Avoids TCP auth complexity.
+- **Identity: Ed25519 keypair per agent, stable ULID under rotatable
+  name.** Signing catches mistakes in a trusted local environment;
+  ULID preserves continuity across renames and re-registrations.
+- **Rooms-first coordination model.** Pub/sub with durable history is
+  the default; channels are the private edge case.
+- **No turn FSM.** Conversation shape is chosen by each caller's
+  choice of `tell` vs `ask`; the daemon enforces no alternation.
 
-## Open questions
+## Outstanding work
 
-1. **Workspace scope** — default is one global kopos repo per user at `~/.kopos/workspace/`. For per-project isolation, the user can set `KOPOS_WORKSPACE=~/.kopos/projects/<name>/` (or any other path) in their shell/direnv before invoking kopos. The daemon picks up the env var on spawn. Multiple daemons for multiple workspaces are supported by socket-path namespacing. MVP ships with global only; per-project isolation is a config choice, not a code change.
-2. **Cross-machine sync** — out of scope for MVP but trivial to add: user configures a git remote on the kopos repo and pushes/pulls. Tunnel mode requires both peers on the same daemon, so tunnels are local-only by definition. Rooms sync naturally via git.
-3. **Harness integration shape** — how does each harness discover the session-start ritual? Requires documentation per harness config file (`CLAUDE.md`, `AGENTS.md`, Cursor rules). No automatic discovery.
-4. **Rate limits / abuse** — not a concern in trusted local model. Revisit if we add multi-user or remote.
-5. **Encryption at rest** — private keys unencrypted in `~/.kopos/keys/`. Macos Keychain / system keyring integration is a later pass.
-6. **Binary language** — Go (simpler static binary, better concurrency primitives for the broker) vs Rust (smaller binary, no GC). Go wins for v0.
+See [BACKLOG.md](../BACKLOG.md) for the full list. Current open
+workstreams:
 
-## Build order
-
-1. **Workspace + CLI skeleton + registry.** No daemon yet — direct file reads/writes. Single-process registration, `agents`, `whoami`.
-2. **Room mode (stateless CLI, file-polling).** `create`, `join`, `leave`, `post`, `inbox`, `peek`, `history`, `participants`. Prove the storage layout and message envelope on the simpler transport.
-3. **Daemon + unix socket.** Auto-spawn, idle-exit, socket protocol. Migrate room commands to route through daemon.
-4. **Identity signing.** Ed25519 keys, signed envelopes, signature verification on read.
-5. **Tunnel mode.** Handshake, turn FSM, blocking send/await, resume, close.
-6. **Bridging.** `archive` from tunnel to room.
-7. **Harness integration docs.** Per-harness config snippets.
-
-## Non-goals restated
-
-- Not an orchestrator. Does not spawn or drive agents.
-- Not a chat UI. Output is CLI/stdout; humans read via `history` or directly in the git log.
-- Not a general IPC system. Scoped to turn-based agent processes.
-- Not a replacement for MCP, A2A, ACP. Different layer: those are agent↔tool or agent↔agent over live APIs; kopos is async coordination with durable history.
+- **L. `lalia rename <new>`** — atomic rename preserving ULID and
+  keypair across every name-indexed surface.
+- **M. Re-register semantics** — codify the unregister-is-terminal
+  stance in the prompts.
+- **N. `lalia agents` columns + worktree-kind** — decomposed columns,
+  grouped-by-repo default view, `WorktreeKind` detection.
+- **S. `task spawn`** — supervisor-driven sub-agent lifecycle
+  (future).
+- **Multi-project workspace isolation** — not yet designed.

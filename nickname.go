@@ -54,7 +54,7 @@ func saveNicknames(m map[string]Nickname) error {
 	return os.Rename(tmp, nicknamesPath())
 }
 
-// cmdNickname implements: kopos nickname [<nick> [<address>]] [-d <nick>] [--follow]
+// cmdNickname implements: lalia nickname [<nick> [<address>]] [-d <nick>] [--follow]
 func cmdNickname(args []string) {
 	if len(args) == 0 {
 		// list all nicknames
@@ -85,7 +85,7 @@ func cmdNickname(args []string) {
 	// -d <nick>: delete
 	if args[0] == "-d" {
 		if len(args) < 2 {
-			fmt.Fprintln(os.Stderr, "usage: kopos nickname -d <nick>")
+			fmt.Fprintln(os.Stderr, "usage: lalia nickname -d <nick>")
 			os.Exit(1)
 		}
 		nick := args[1]
@@ -128,7 +128,7 @@ func cmdNickname(args []string) {
 		return
 	}
 
-	// assign: kopos nickname [--follow] <nick> <address>
+	// assign: lalia nickname [--follow] <nick> <address>
 	follow := false
 	remaining := args
 	for i, a := range remaining {
@@ -139,7 +139,7 @@ func cmdNickname(args []string) {
 		}
 	}
 	if len(remaining) < 2 {
-		fmt.Fprintln(os.Stderr, "usage: kopos nickname [--follow] <nick> <address>")
+		fmt.Fprintln(os.Stderr, "usage: lalia nickname [--follow] <nick> <address>")
 		os.Exit(1)
 	}
 	nick = remaining[0]

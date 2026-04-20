@@ -21,8 +21,8 @@ func TestInitWorkerMatchesEmbeddedPrompt(t *testing.T) {
 	}
 }
 
-// writeManagedPromptFile is the helper used by `kopos run` to drop the role
-// prompt into a harness instructions file. `kopos prompt` no longer writes —
+// writeManagedPromptFile is the helper used by `lalia run` to drop the role
+// prompt into a harness instructions file. `lalia prompt` no longer writes —
 // this test exercises the helper directly.
 func TestWriteManagedPromptFileRespectsOverwriteMarker(t *testing.T) {
 	dir := t.TempDir()
@@ -33,20 +33,20 @@ func TestWriteManagedPromptFileRespectsOverwriteMarker(t *testing.T) {
 		t.Fatalf("promptForRole: %v", err)
 	}
 
-	path := filepath.Join(dir, "KOPOS.md")
+	path := filepath.Join(dir, "LALIA.md")
 	if err := writeManagedPromptFile(path, prompt, false); err != nil {
 		t.Fatalf("writeManagedPromptFile create: %v", err)
 	}
 	data, err := os.ReadFile(path)
 	if err != nil {
-		t.Fatalf("read KOPOS.md: %v", err)
+		t.Fatalf("read LALIA.md: %v", err)
 	}
 	if !strings.HasPrefix(string(data), managedPromptMarker+"\n") {
-		t.Fatalf("KOPOS.md missing managed marker prefix")
+		t.Fatalf("LALIA.md missing managed marker prefix")
 	}
 
 	if err := os.WriteFile(path, []byte("custom content\n"), 0644); err != nil {
-		t.Fatalf("seed custom KOPOS.md: %v", err)
+		t.Fatalf("seed custom LALIA.md: %v", err)
 	}
 	if err := writeManagedPromptFile(path, prompt, false); err == nil {
 		t.Fatalf("expected overwrite refusal for unmarked file")
@@ -70,11 +70,11 @@ func TestRunHarnessClaudeWritesPromptAndExecsHarness(t *testing.T) {
 	if err := runHarness("worker", "--claude-code", false, []string{"--dry-run"}); err != nil {
 		t.Fatalf("runHarness claude: %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(dir, "KOPOS.md")); err != nil {
-		t.Fatalf("KOPOS.md not written: %v", err)
+	if _, err := os.Stat(filepath.Join(dir, "LALIA.md")); err != nil {
+		t.Fatalf("LALIA.md not written: %v", err)
 	}
 	args := readStubArgs(t, logPath)
-	want := []string{"--append-system-prompt-file", "KOPOS.md", "--dry-run"}
+	want := []string{"--append-system-prompt-file", "LALIA.md", "--dry-run"}
 	if strings.Join(args, "\n") != strings.Join(want, "\n") {
 		t.Fatalf("claude argv=%v want=%v", args, want)
 	}
@@ -94,8 +94,8 @@ func TestRunHarnessCodexWritesPromptAndExecsWithConfigOverride(t *testing.T) {
 	if err := runHarness("worker", "--codex", false, []string{"--continue"}); err != nil {
 		t.Fatalf("runHarness codex: %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(dir, "KOPOS.md")); err != nil {
-		t.Fatalf("KOPOS.md not written: %v", err)
+	if _, err := os.Stat(filepath.Join(dir, "LALIA.md")); err != nil {
+		t.Fatalf("LALIA.md not written: %v", err)
 	}
 	args := readStubArgs(t, logPath)
 	if len(args) < 3 {
@@ -107,7 +107,7 @@ func TestRunHarnessCodexWritesPromptAndExecsWithConfigOverride(t *testing.T) {
 	if !strings.HasPrefix(args[1], "experimental_instructions_file=") {
 		t.Fatalf("codex config override missing: %q", args[1])
 	}
-	if !strings.Contains(args[1], filepath.Join(dir, "KOPOS.md")) {
+	if !strings.Contains(args[1], filepath.Join(dir, "LALIA.md")) {
 		t.Fatalf("codex config override path missing: %q", args[1])
 	}
 	if args[2] != "--continue" {
@@ -138,13 +138,13 @@ func TestRunHarnessCopilotRefusesUnmarkedFileWithoutForce(t *testing.T) {
 func TestColdPathsInitPromptRunWithoutDaemonOrRegister(t *testing.T) {
 	dir := t.TempDir()
 	t.Chdir(dir)
-	t.Setenv("KOPOS_HOME", filepath.Join(dir, "kopos-home"))
-	t.Setenv("KOPOS_WORKSPACE", filepath.Join(dir, "workspace"))
+	t.Setenv("LALIA_HOME", filepath.Join(dir, "lalia-home"))
+	t.Setenv("LALIA_WORKSPACE", filepath.Join(dir, "workspace"))
 
 	if _, err := promptForRole("worker"); err != nil {
 		t.Fatalf("promptForRole worker: %v", err)
 	}
-	if err := writeManagedPromptFile(filepath.Join(dir, "KOPOS.md"), workerPrompt, false); err != nil {
+	if err := writeManagedPromptFile(filepath.Join(dir, "LALIA.md"), workerPrompt, false); err != nil {
 		t.Fatalf("writeManagedPromptFile: %v", err)
 	}
 

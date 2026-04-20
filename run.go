@@ -12,9 +12,9 @@ import (
 )
 
 const (
-	managedPromptMarker = "<!-- kopos:managed -->"
-	copilotBeginMarker  = "<!-- kopos-begin -->"
-	copilotEndMarker    = "<!-- kopos-end -->"
+	managedPromptMarker = "<!-- lalia:managed -->"
+	copilotBeginMarker  = "<!-- lalia-begin -->"
+	copilotEndMarker    = "<!-- lalia-end -->"
 )
 
 //go:embed prompts/worker.md
@@ -22,6 +22,9 @@ var workerPrompt string
 
 //go:embed prompts/supervisor.md
 var supervisorPrompt string
+
+//go:embed prompts/peer.md
+var peerPrompt string
 
 func parseRunArgs(args []string) (harness string, force bool, harnessArgs []string, err error) {
 	for _, a := range args {
@@ -53,18 +56,18 @@ func runHarness(role, harness string, force bool, harnessArgs []string) error {
 		return err
 	}
 
-	koposPath := filepath.Join(cwd, "KOPOS.md")
+	laliaPath := filepath.Join(cwd, "LALIA.md")
 	switch harness {
 	case "--claude-code":
-		if err := writeManagedPromptFile(koposPath, prompt, force); err != nil {
+		if err := writeManagedPromptFile(laliaPath, prompt, force); err != nil {
 			return err
 		}
-		return runExternal("claude", append([]string{"--append-system-prompt-file", "KOPOS.md"}, harnessArgs...))
+		return runExternal("claude", append([]string{"--append-system-prompt-file", "LALIA.md"}, harnessArgs...))
 	case "--codex":
-		if err := writeManagedPromptFile(koposPath, prompt, force); err != nil {
+		if err := writeManagedPromptFile(laliaPath, prompt, force); err != nil {
 			return err
 		}
-		configArg := fmt.Sprintf("experimental_instructions_file=%q", koposPath)
+		configArg := fmt.Sprintf("experimental_instructions_file=%q", laliaPath)
 		errText, err := runExternalCaptureStderr("codex", append([]string{"-c", configArg}, harnessArgs...))
 		if err == nil {
 			return nil
@@ -91,12 +94,14 @@ func runHarness(role, harness string, force bool, harnessArgs []string) error {
 
 func promptForRole(role string) (string, error) {
 	switch role {
+	case "peer":
+		return peerPrompt, nil
 	case "worker":
 		return workerPrompt, nil
 	case "supervisor":
 		return supervisorPrompt, nil
 	default:
-		return "", fmt.Errorf("unknown role: %s (expected worker or supervisor)", role)
+		return "", fmt.Errorf("unknown role: %s (expected peer, worker or supervisor)", role)
 	}
 }
 

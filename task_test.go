@@ -158,8 +158,8 @@ func TestWorkerCanFlipOwnStatus(t *testing.T) {
 }
 
 func TestSupervisorBusyBlocksUnregister(t *testing.T) {
-	t.Setenv("KOPOS_HOME", t.TempDir())
-	t.Setenv("KOPOS_WORKSPACE", filepath.Join(t.TempDir(), "workspace"))
+	t.Setenv("LALIA_HOME", t.TempDir())
+	t.Setenv("LALIA_WORKSPACE", filepath.Join(t.TempDir(), "workspace"))
 	s := newFixtureState()
 	mustRegisterRole(t, s, "sup", "supervisor", 1)
 
@@ -223,7 +223,7 @@ func TestProjectIDDerivation(t *testing.T) {
 		{"https://github.com/org/my-repo.git", "", "my-repo"},
 		{"git@github.com:org/my-repo.git", "", "my-repo"},
 		{"https://github.com/org/My_Repo.git", "", "my-repo"},
-		{"", "kopos", "kopos"},
+		{"", "lalia", "lalia"},
 		{"", "", "default"},
 	}
 	for _, c := range cases {
@@ -236,7 +236,7 @@ func TestProjectIDDerivation(t *testing.T) {
 
 func TestTaskListRoundTrip(t *testing.T) {
 	ws := filepath.Join(t.TempDir(), "workspace")
-	t.Setenv("KOPOS_WORKSPACE", ws)
+	t.Setenv("LALIA_WORKSPACE", ws)
 
 	original := &TaskList{
 		ProjectID:  "myproject",
@@ -595,7 +595,7 @@ func TestTaskReassignRewiresRoomMembership(t *testing.T) {
 // new schema.
 func TestBootMigrationConvertsPlansDirToTasks(t *testing.T) {
 	ws := filepath.Join(t.TempDir(), "workspace")
-	t.Setenv("KOPOS_WORKSPACE", ws)
+	t.Setenv("LALIA_WORKSPACE", ws)
 
 	legacy := map[string]any{
 		"project_id": "myproject",
@@ -656,8 +656,8 @@ func TestBootMigrationConvertsPlansDirToTasks(t *testing.T) {
 	}
 }
 
-// TestInitAndPromptEmitByteIdenticalOutput guards the contract that `kopos
-// init <role>` and `kopos prompt <role>` emit the same bytes.
+// TestInitAndPromptEmitByteIdenticalOutput guards the contract that `lalia
+// init <role>` and `lalia prompt <role>` emit the same bytes.
 func TestInitAndPromptEmitByteIdenticalOutput(t *testing.T) {
 	for _, role := range []string{"worker", "supervisor"} {
 		p1, err := promptForRole(role)

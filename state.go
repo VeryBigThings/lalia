@@ -307,10 +307,10 @@ func (s *State) dispatch(req Request) Response {
 			}
 			s.mu.Unlock()
 			if a == nil {
-				return errorResponse(CodeUnauthorized, "not_registered", "run kopos register for this identity", "not registered: "+from, map[string]any{"from": from})
+				return errorResponse(CodeUnauthorized, "not_registered", "run lalia register for this identity", "not registered: "+from, map[string]any{"from": from})
 			}
 			if pubHex == "" {
-				return errorResponse(CodeUnauthorized, "missing_pubkey", "run kopos register to generate a keypair", "agent "+from+" has no pubkey on file; re-register to acquire one", map[string]any{"from": from})
+				return errorResponse(CodeUnauthorized, "missing_pubkey", "run lalia register to generate a keypair", "agent "+from+" has no pubkey on file; re-register to acquire one", map[string]any{"from": from})
 			}
 			if err := verifyRequest(pubHex, req.Args); err != nil {
 				return errorResponse(CodeUnauthorized, "signature_rejected", "re-register if your key changed", "signature rejected: "+err.Error(), map[string]any{"from": from})
@@ -381,7 +381,7 @@ func (s *State) dispatch(req Request) Response {
 	case "stop":
 		return s.opStop()
 	default:
-		return errorResponse(CodeError, "unknown_op", "check `kopos --help` for supported commands", "unknown op: "+req.Op, map[string]any{"op": req.Op})
+		return errorResponse(CodeError, "unknown_op", "check `lalia --help` for supported commands", "unknown op: "+req.Op, map[string]any{"op": req.Op})
 	}
 }
 
@@ -390,7 +390,7 @@ func (s *State) opRegister(req Request) Response {
 	pidF, _ := req.Args["pid"].(float64)
 	pid := int(pidF)
 	if name == "" {
-		return errorResponse(CodeError, "missing_name", "pass --name or set KOPOS_NAME", "name required", nil)
+		return errorResponse(CodeError, "missing_name", "pass --name or set LALIA_NAME", "name required", nil)
 	}
 	pub, _, err := ensureKey(name)
 	if err != nil {
@@ -474,13 +474,13 @@ func strVal(args map[string]any, key string) string {
 func (s *State) opUnregister(req Request) Response {
 	from, _ := req.Args["from"].(string)
 	if from == "" {
-		return errorResponse(CodeError, "missing_from", "set KOPOS_NAME or pass --as", "from required", nil)
+		return errorResponse(CodeError, "missing_from", "set LALIA_NAME or pass --as", "from required", nil)
 	}
 	s.mu.Lock()
 	a := s.agentByName(from)
 	if a == nil {
 		s.mu.Unlock()
-		return errorResponse(CodeNotFound, "not_registered", "run kopos register before unregister", "not registered: "+from, map[string]any{"from": from})
+		return errorResponse(CodeNotFound, "not_registered", "run lalia register before unregister", "not registered: "+from, map[string]any{"from": from})
 	}
 	// Reject unregister if this agent is a supervisor with active (non-merged) tasks.
 	for pid, tl := range s.tasks {
@@ -490,7 +490,7 @@ func (s *State) opUnregister(req Request) Response {
 		for _, t := range tl.Tasks {
 			if t.Status != statusMerged {
 				s.mu.Unlock()
-				return errorResponse(CodeSupervisorBusy, "supervisor_busy", "run kopos task handoff <agent> first to transfer ownership", "supervisor still owns active tasks in project "+pid, map[string]any{"project": pid, "slug": t.Slug})
+				return errorResponse(CodeSupervisorBusy, "supervisor_busy", "run lalia task handoff <agent> first to transfer ownership", "supervisor still owns active tasks in project "+pid, map[string]any{"project": pid, "slug": t.Slug})
 			}
 		}
 	}
@@ -527,13 +527,13 @@ func (s *State) opUnregister(req Request) Response {
 func (s *State) opRenew(req Request) Response {
 	from, _ := req.Args["from"].(string)
 	if from == "" {
-		return errorResponse(CodeError, "missing_from", "set KOPOS_NAME or pass --as", "from required", nil)
+		return errorResponse(CodeError, "missing_from", "set LALIA_NAME or pass --as", "from required", nil)
 	}
 	s.mu.Lock()
 	a := s.agentByName(from)
 	if a == nil {
 		s.mu.Unlock()
-		return errorResponse(CodeNotFound, "not_registered", "run kopos register before renew", "not registered: "+from, map[string]any{"from": from})
+		return errorResponse(CodeNotFound, "not_registered", "run lalia register before renew", "not registered: "+from, map[string]any{"from": from})
 	}
 	now := time.Now()
 	a.LastSeenAt = now
@@ -550,12 +550,12 @@ func (s *State) opRenew(req Request) Response {
 func (s *State) opChannels(req Request) Response {
 	from, _ := req.Args["from"].(string)
 	if from == "" {
-		return errorResponse(CodeError, "missing_from", "set KOPOS_NAME or pass --as", "from required", nil)
+		return errorResponse(CodeError, "missing_from", "set LALIA_NAME or pass --as", "from required", nil)
 	}
 	s.mu.Lock()
 	if s.agentByName(from) == nil {
 		s.mu.Unlock()
-		return errorResponse(CodeNotFound, "not_registered", "run kopos register before listing channels", "not registered: "+from, map[string]any{"from": from})
+		return errorResponse(CodeNotFound, "not_registered", "run lalia register before listing channels", "not registered: "+from, map[string]any{"from": from})
 	}
 	s.mu.Unlock()
 	out := []any{}
@@ -587,13 +587,13 @@ func (s *State) opTell(req Request) Response {
 	s.mu.Lock()
 	if s.agentByName(from) == nil {
 		s.mu.Unlock()
-		return errorResponse(CodeNotFound, "caller_not_registered", "run kopos register before sending", "caller not registered: "+from, map[string]any{"from": from})
+		return errorResponse(CodeNotFound, "caller_not_registered", "run lalia register before sending", "caller not registered: "+from, map[string]any{"from": from})
 	}
 	// Resolve peer address to a name
 	peerName, err := s.resolvePeerName(peer)
 	if err != nil {
 		s.mu.Unlock()
-		return errorResponse(CodeNotFound, "peer_not_registered", "check `kopos agents` for active peers", err.Error(), map[string]any{"peer": peer})
+		return errorResponse(CodeNotFound, "peer_not_registered", "check `lalia agents` for active peers", err.Error(), map[string]any{"peer": peer})
 	}
 	s.mu.Unlock()
 	ch := s.getOrCreateChannel(from, peerName)
@@ -609,7 +609,7 @@ func (s *State) opRead(req Request) Response {
 	timeoutF, _ := req.Args["timeout"].(float64)
 	timeout := int(timeoutF)
 	if from == "" {
-		return errorResponse(CodeError, "missing_from", "set KOPOS_NAME or pass --as", "from required", nil)
+		return errorResponse(CodeError, "missing_from", "set LALIA_NAME or pass --as", "from required", nil)
 	}
 	if peer == "" && room == "" {
 		return errorResponse(CodeError, "missing_target", "specify peer or room", "peer or room required", nil)
@@ -622,7 +622,7 @@ func (s *State) opRead(req Request) Response {
 		peerName, err := s.resolvePeerName(peer)
 		if err != nil {
 			s.mu.Unlock()
-			return errorResponse(CodeNotFound, "peer_not_registered", "check `kopos agents` for active peers", err.Error(), map[string]any{"peer": peer})
+			return errorResponse(CodeNotFound, "peer_not_registered", "check `lalia agents` for active peers", err.Error(), map[string]any{"peer": peer})
 		}
 		s.mu.Unlock()
 		ch := s.getOrCreateChannel(from, peerName)
@@ -637,7 +637,7 @@ func (s *State) opPeek(req Request) Response {
 	peer, _ := req.Args["peer"].(string)
 	room, _ := req.Args["room"].(string)
 	if from == "" {
-		return errorResponse(CodeError, "missing_from", "set KOPOS_NAME or pass --as", "from required", nil)
+		return errorResponse(CodeError, "missing_from", "set LALIA_NAME or pass --as", "from required", nil)
 	}
 	if peer == "" && room == "" {
 		return errorResponse(CodeError, "missing_target", "specify peer or room", "peer or room required", nil)
@@ -650,7 +650,7 @@ func (s *State) opPeek(req Request) Response {
 		peerName, err := s.resolvePeerName(peer)
 		if err != nil {
 			s.mu.Unlock()
-			return errorResponse(CodeNotFound, "peer_not_registered", "check `kopos agents` for active peers", err.Error(), map[string]any{"peer": peer})
+			return errorResponse(CodeNotFound, "peer_not_registered", "check `lalia agents` for active peers", err.Error(), map[string]any{"peer": peer})
 		}
 		_, hasChannel := s.channels[channelKey(from, peerName)]
 		s.mu.Unlock()
@@ -674,7 +674,7 @@ func (s *State) opReadAny(req Request) Response {
 		timeout = 300
 	}
 	if from == "" {
-		return errorResponse(CodeError, "missing_from", "set KOPOS_NAME or pass --as", "from required", nil)
+		return errorResponse(CodeError, "missing_from", "set LALIA_NAME or pass --as", "from required", nil)
 	}
 	// First pass: drain any pending messages from channels or rooms.
 	s.mu.Lock()
@@ -755,7 +755,7 @@ func (s *State) opHistory(req Request) Response {
 	since := int(sinceF)
 	limit := int(limitF)
 	if from == "" {
-		return errorResponse(CodeError, "missing_from", "set KOPOS_NAME or pass --as", "from required", nil)
+		return errorResponse(CodeError, "missing_from", "set LALIA_NAME or pass --as", "from required", nil)
 	}
 	if peer == "" && room == "" {
 		return errorResponse(CodeError, "missing_target", "specify peer or room", "peer or room required", nil)
@@ -859,7 +859,7 @@ func (s *State) opResolve(req Request) Response {
 	agentID, err := s.ResolveAddress(address, nicknames)
 	s.mu.Unlock()
 	if err != nil {
-		return errorResponse(CodeNotFound, "address_not_found", "check `kopos agents` or nicknames", err.Error(), map[string]any{"address": address})
+		return errorResponse(CodeNotFound, "address_not_found", "check `lalia agents` or nicknames", err.Error(), map[string]any{"address": address})
 	}
 	return Response{OK: true, Data: map[string]any{"agent_id": agentID}}
 }

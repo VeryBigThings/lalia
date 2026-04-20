@@ -73,7 +73,7 @@ func validRoomName(name string) bool {
 func (s *State) opRooms(req Request) Response {
 	from, _ := req.Args["from"].(string)
 	if from == "" {
-		return errorResponse(CodeError, "missing_from", "set KOPOS_NAME or pass --as", "from required", nil)
+		return errorResponse(CodeError, "missing_from", "set LALIA_NAME or pass --as", "from required", nil)
 	}
 
 	s.mu.Lock()
@@ -107,7 +107,7 @@ func (s *State) opRoomCreate(req Request) Response {
 	desc, _ := req.Args["desc"].(string)
 
 	if from == "" {
-		return errorResponse(CodeError, "missing_from", "set KOPOS_NAME or pass --as", "from required", nil)
+		return errorResponse(CodeError, "missing_from", "set LALIA_NAME or pass --as", "from required", nil)
 	}
 	if !validRoomName(name) {
 		return errorResponse(CodeError, "invalid_room_name", "use [A-Za-z0-9._-], max 64 chars", "invalid room name (use [A-Za-z0-9._-], max 64 chars)", map[string]any{"room": name})
@@ -147,7 +147,7 @@ func (s *State) opJoin(req Request) Response {
 	r, ok := s.rooms[room]
 	s.mu.Unlock()
 	if !ok {
-		return errorResponse(CodeNotFound, "room_not_found", "use `kopos rooms` to list available rooms", "room not found: "+room, map[string]any{"room": room})
+		return errorResponse(CodeNotFound, "room_not_found", "use `lalia rooms` to list available rooms", "room not found: "+room, map[string]any{"room": room})
 	}
 
 	r.mu.Lock()
@@ -180,7 +180,7 @@ func (s *State) opLeave(req Request) Response {
 	r, ok := s.rooms[room]
 	s.mu.Unlock()
 	if !ok {
-		return errorResponse(CodeNotFound, "room_not_found", "use `kopos rooms` to list available rooms", "room not found: "+room, map[string]any{"room": room})
+		return errorResponse(CodeNotFound, "room_not_found", "use `lalia rooms` to list available rooms", "room not found: "+room, map[string]any{"room": room})
 	}
 
 	r.mu.Lock()
@@ -212,7 +212,7 @@ func (s *State) opParticipants(req Request) Response {
 	r, ok := s.rooms[room]
 	s.mu.Unlock()
 	if !ok {
-		return errorResponse(CodeNotFound, "room_not_found", "use `kopos rooms` to list available rooms", "room not found: "+room, map[string]any{"room": room})
+		return errorResponse(CodeNotFound, "room_not_found", "use `lalia rooms` to list available rooms", "room not found: "+room, map[string]any{"room": room})
 	}
 
 	r.mu.Lock()
@@ -250,7 +250,7 @@ func (s *State) opPost(req Request) Response {
 	r, ok := s.rooms[room]
 	s.mu.Unlock()
 	if !ok {
-		return errorResponse(CodeNotFound, "room_not_found", "use `kopos rooms` to list available rooms", "room not found: "+room, map[string]any{"room": room})
+		return errorResponse(CodeNotFound, "room_not_found", "use `lalia rooms` to list available rooms", "room not found: "+room, map[string]any{"room": room})
 	}
 
 	r.mu.Lock()
@@ -339,7 +339,7 @@ func (s *State) roomRead(from, room string, timeout time.Duration) Response {
 	r, ok := s.rooms[room]
 	s.mu.Unlock()
 	if !ok {
-		return errorResponse(CodeNotFound, "room_not_found", "use `kopos rooms` to list available rooms", "room not found: "+room, map[string]any{"room": room})
+		return errorResponse(CodeNotFound, "room_not_found", "use `lalia rooms` to list available rooms", "room not found: "+room, map[string]any{"room": room})
 	}
 	r.mu.Lock()
 	if !r.members[from] {
@@ -424,7 +424,7 @@ func (s *State) roomPeek(from, room string) Response {
 	r, ok := s.rooms[room]
 	s.mu.Unlock()
 	if !ok {
-		return errorResponse(CodeNotFound, "room_not_found", "use `kopos rooms` to list available rooms", "room not found: "+room, map[string]any{"room": room})
+		return errorResponse(CodeNotFound, "room_not_found", "use `lalia rooms` to list available rooms", "room not found: "+room, map[string]any{"room": room})
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -453,7 +453,7 @@ func (s *State) roomHistory(from, room string, since, limit int) Response {
 	r, ok := s.rooms[room]
 	s.mu.Unlock()
 	if !ok {
-		return errorResponse(CodeNotFound, "room_not_found", "use `kopos rooms` to list available rooms", "room not found: "+room, map[string]any{"room": room})
+		return errorResponse(CodeNotFound, "room_not_found", "use `lalia rooms` to list available rooms", "room not found: "+room, map[string]any{"room": room})
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()

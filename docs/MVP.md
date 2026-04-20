@@ -1,21 +1,36 @@
-# Kopos — MVP
+# Lalia — MVP (historical)
 
-Minimum viable implementation to prove the concept: Claude Code and Codex running in two terminals, holding a synchronous conversation via `kopos` with a git-backed transcript.
+> **Historical note.** This is the original MVP build plan from the
+> first week of the project. It describes a tunnel-based transport
+> (`send` / `await` / `close` / `sid`) that has since been replaced
+> by channels (`tell` / `ask` / `read` / `peek` / `read-any`). The
+> resumable-blocking workstream referenced here was killed with the
+> channels redesign; the write-queue, rooms, signing, leases,
+> mailbox persistence, structured errors, keychain integration, task
+> primitive, and harness bootstrap helpers are all shipped.
+>
+> For the system as shipped, see
+> [ARCHITECTURE.md](./ARCHITECTURE.md) and [IDEA.md](./IDEA.md). The
+> vocabulary transition is captured in [CHANNELS.md](./CHANNELS.md).
+>
+> This file is preserved unchanged below as a record of early intent.
+
+Minimum viable implementation to prove the concept: Claude Code and Codex running in two terminals, holding a synchronous conversation via `lalia` with a git-backed transcript.
 
 ## Goal
 
-Two agents, two terminals, one tunnel. The Claude Code session sends a message with `kopos send` and blocks. The Codex session receives it with `kopos await`. Codex sends a reply; Claude's original `send` returns that reply. Repeat for several turns. Close the tunnel. Inspect the git history in `~/.kopos/workspace/` and see every message.
+Two agents, two terminals, one tunnel. The Claude Code session sends a message with `lalia send` and blocks. The Codex session receives it with `lalia await`. Codex sends a reply; Claude's original `send` returns that reply. Repeat for several turns. Close the tunnel. Inspect the git history in `~/.lalia/workspace/` and see every message.
 
 Everything not strictly required to make that work is deferred.
 
 ## Scope
 
 **In**
-- Single binary `kopos` (Go).
-- Auto-spawned daemon listening on `~/.kopos/sock`.
+- Single binary `lalia` (Go).
+- Auto-spawned daemon listening on `~/.lalia/sock`.
 - In-memory tunnel state with turn enforcement.
 - Single project, single tunnel type (two-party sync).
-- Git-backed transcript in `~/.kopos/workspace/`.
+- Git-backed transcript in `~/.lalia/workspace/`.
 - Subcommands: `register`, `agents`, `tunnel`, `send`, `await`, `close`, `stop`.
 
 **Out (deferred to post-MVP)**
@@ -24,17 +39,17 @@ Everything not strictly required to make that work is deferred.
 - Write queue / crash recovery. Synchronous commits; a crash loses at most the in-flight message.
 - Project folders, worktree/branch auto-detection, remote-URL resolution. One flat workspace.
 - Cursors, `inbox`, `peek`, `history`, `participants`.
-- Resumable blocking (`kopos resume`). Default timeout returns an error; agent retries by calling `send`/`await` again if desired.
+- Resumable blocking (`lalia resume`). Default timeout returns an error; agent retries by calling `send`/`await` again if desired.
 - Bridging (`archive`), presence heartbeats, gc on idle, keychain integration.
 - ULID filenames — MVP uses a simple monotonic counter per tunnel (single-machine, no sync story yet).
 
 ## Components (MVP)
 
 ```
-kopos CLI  ──unix socket──▶  kopos daemon (goroutines + in-memory state)
+lalia CLI  ──unix socket──▶  lalia daemon (goroutines + in-memory state)
                                          │
                                          ▼
-                               ~/.kopos/workspace/ (git repo)
+                               ~/.lalia/workspace/ (git repo)
                                └── tunnels/<sid>/
                                    ├── SESSION.md
                                    └── NNN-<from>.md
@@ -44,16 +59,16 @@ No SQLite. No write queue. No signing. No cursors. No project scoping.
 
 ### Daemon
 
-- Auto-spawn on first CLI call; `~/.kopos/sock` as the unix socket.
+- Auto-spawn on first CLI call; `~/.lalia/sock` as the unix socket.
 - State held in memory: `agents map[name]AgentInfo`, `tunnels map[sid]TunnelState`.
 - Turn FSM per tunnel: `{sid, initiator, peer, turn: initiator|peer, counter: int, closed: bool}`.
 - Single writer goroutine for the workspace repo. All commits serialized.
 - On each message: write file, `git add`, `git commit`, then reply to the waiting client.
-- No idle timeout in MVP — run until `kopos stop` or SIGINT.
+- No idle timeout in MVP — run until `lalia stop` or SIGINT.
 
 ### Workspace
 
-- `~/.kopos/workspace/` initialized as a git repo on first daemon start (if not already).
+- `~/.lalia/workspace/` initialized as a git repo on first daemon start (if not already).
 - `main` branch. No branching logic.
 - Each tunnel: `tunnels/<sid>/` with `SESSION.md` (peers, opened-at, closed-at) and `NNN-<from>.md` per message.
 
@@ -77,13 +92,13 @@ No `id`, `channel`, `reply_to`, or `sig` fields in MVP. `seq` and `sid` are enou
 
 | Command | Behavior |
 |---|---|
-| `kopos register --name <name>` | Spawn daemon if needed. Record `{name, pid, started_at}` in daemon state. Exit 0 with `name` printed. Re-registering same `name` from same pid is idempotent; from different pid returns error. |
-| `kopos agents` | Print one line per registered agent: `<name>  <pid>  <started_at>`. |
-| `kopos tunnel <peer>` | Create a tunnel with `<peer>`. `<peer>` must be registered. Returns `sid`. State initialized with `turn=caller`. Does not block — the tunnel is ready for the caller to `send`. If peer is not registered, exit non-zero with "peer not registered". |
-| `kopos send <sid> "msg" [--timeout 300]` | Append message, commit, block until peer sends next message or timeout. If not caller's turn, exit with "not_your_turn". Returns peer's reply on stdout. |
-| `kopos await <sid> [--timeout 300]` | Block until a message arrives on this tunnel or timeout. If caller's turn (they owe a send, not await), exit with "not_your_turn". Returns the message on stdout. |
-| `kopos close <sid>` | Mark tunnel closed. If peer is blocked on `await` or `send`, their call returns exit code 3 with "peer_closed". |
-| `kopos stop` | Shut down daemon. |
+| `lalia register --name <name>` | Spawn daemon if needed. Record `{name, pid, started_at}` in daemon state. Exit 0 with `name` printed. Re-registering same `name` from same pid is idempotent; from different pid returns error. |
+| `lalia agents` | Print one line per registered agent: `<name>  <pid>  <started_at>`. |
+| `lalia tunnel <peer>` | Create a tunnel with `<peer>`. `<peer>` must be registered. Returns `sid`. State initialized with `turn=caller`. Does not block — the tunnel is ready for the caller to `send`. If peer is not registered, exit non-zero with "peer not registered". |
+| `lalia send <sid> "msg" [--timeout 300]` | Append message, commit, block until peer sends next message or timeout. If not caller's turn, exit with "not_your_turn". Returns peer's reply on stdout. |
+| `lalia await <sid> [--timeout 300]` | Block until a message arrives on this tunnel or timeout. If caller's turn (they owe a send, not await), exit with "not_your_turn". Returns the message on stdout. |
+| `lalia close <sid>` | Mark tunnel closed. If peer is blocked on `await` or `send`, their call returns exit code 3 with "peer_closed". |
+| `lalia stop` | Shut down daemon. |
 
 Exit codes:
 - 0 success
@@ -119,9 +134,9 @@ Concretely for a two-turn exchange (A initiates, B replies, A replies):
 
 ## Build order
 
-1. Project scaffold, CLI arg parsing (Go + `spf13/cobra` or stdlib `flag`). Binary `kopos`.
+1. Project scaffold, CLI arg parsing (Go + `spf13/cobra` or stdlib `flag`). Binary `lalia`.
 2. Unix socket server/client: define a simple length-prefixed JSON request/response protocol. One request = one response.
-3. Daemon process: auto-spawn via `exec.Command` + double-fork-ish detach (or just `setsid` on Linux/macOS). PID file at `~/.kopos/pid`.
+3. Daemon process: auto-spawn via `exec.Command` + double-fork-ish detach (or just `setsid` on Linux/macOS). PID file at `~/.lalia/pid`.
 4. In-memory agents + tunnels maps. Register, agents, tunnel subcommands wired end-to-end.
 5. Git writer goroutine: takes `WriteRequest{path, content}` from a channel, `git add && git commit`. Workspace auto-init on first use.
 6. Send/await/close with turn FSM and per-client blocking via response channels. Timeout via `context.WithTimeout`.
@@ -135,38 +150,38 @@ Rough effort: one to two focused days.
 ### Shell A (simulating Claude Code)
 
 ```
-$ kopos register --name claude
+$ lalia register --name claude
 claude
 
-$ kopos tunnel codex
+$ lalia tunnel codex
 sid=01HX9Z
 
-$ kopos send 01HX9Z "hello codex, can you hear me?"
+$ lalia send 01HX9Z "hello codex, can you hear me?"
 # blocks …
 # returns: "yes, I hear you. what's the question?"
 
-$ kopos send 01HX9Z "are you running gpt-5?"
+$ lalia send 01HX9Z "are you running gpt-5?"
 # blocks …
 # returns: "yes, gpt-5 via codex CLI."
 
-$ kopos close 01HX9Z
+$ lalia close 01HX9Z
 ```
 
 ### Shell B (simulating Codex)
 
 ```
-$ kopos register --name codex
+$ lalia register --name codex
 codex
 
-$ kopos await 01HX9Z
+$ lalia await 01HX9Z
 # blocks …
 # returns: "hello codex, can you hear me?"
 
-$ kopos send 01HX9Z "yes, I hear you. what's the question?"
+$ lalia send 01HX9Z "yes, I hear you. what's the question?"
 # blocks …
 # returns: "are you running gpt-5?"
 
-$ kopos send 01HX9Z "yes, gpt-5 via codex CLI."
+$ lalia send 01HX9Z "yes, gpt-5 via codex CLI."
 # blocks …
 # exit code 3, stderr: "peer_closed"
 ```
@@ -174,7 +189,7 @@ $ kopos send 01HX9Z "yes, gpt-5 via codex CLI."
 ### Verification
 
 ```
-$ cd ~/.kopos/workspace/
+$ cd ~/.lalia/workspace/
 $ git log --oneline tunnels/01HX9Z/
 <4 commits: SESSION.md open, 3 messages, SESSION.md close>
 
@@ -184,18 +199,18 @@ SESSION.md  001-claude.md  002-codex.md  003-claude.md
 
 ### Acceptance criteria
 
-1. Both agents register without error; `kopos agents` lists both.
+1. Both agents register without error; `lalia agents` lists both.
 2. Tunnel opens with a session id.
 3. Each `send` blocks until the peer sends the next message.
 4. Each `await` blocks until a message arrives.
 5. Out-of-turn `send` or `await` returns exit 4 immediately with a clear message.
-6. `kopos close` terminates the tunnel; peer's blocked call returns exit 3.
+6. `lalia close` terminates the tunnel; peer's blocked call returns exit 3.
 7. Git history in the workspace reflects every message in order.
 8. Running the loop integrated with actual Claude Code and Codex sessions (via their Bash/tool invocations) produces a coherent conversation.
 
 ## Known MVP limitations
 
-- **Tool-call timeout mismatch.** Claude Code's Bash tool caps at 10 min. If Codex takes longer than 300 s default to reply, Claude's `send` times out with exit 2; the tunnel remains open, and Claude can call `send` again with a matching noop or just `await` to re-enter wait. Post-MVP: `kopos resume <sid>` re-enters the wait cleanly.
+- **Tool-call timeout mismatch.** Claude Code's Bash tool caps at 10 min. If Codex takes longer than 300 s default to reply, Claude's `send` times out with exit 2; the tunnel remains open, and Claude can call `send` again with a matching noop or just `await` to re-enter wait. Post-MVP: `lalia resume <sid>` re-enters the wait cleanly.
 - **Crash loses last message.** Synchronous commit means a daemon crash between "accept client write" and "commit" loses the message. Acceptable for testing; write queue comes later.
 - **Identity is trust-on-first-use.** Any process can claim any `--name`. Fine for single-user local testing; signing comes later.
 - **No presence.** If one agent's harness dies without running `unregister`, the daemon doesn't notice. A subsequent `tunnel <dead-agent>` may succeed and then the caller's `send` hangs until timeout. Post-MVP: heartbeats via the socket.
@@ -213,13 +228,13 @@ Those are separate milestones after the two-agent sync case is solid.
 
 ## Post-MVP roadmap
 
-Consolidated from two kopos tunnel exchanges between Claude Opus 4.7 and GPT-5 (via Codex) on 2026-04-17 (`tunnels/2417d8c0c877/` and `tunnels/d14651711e66/` in the workspace log), reviewed with the user afterward.
+Consolidated from two lalia tunnel exchanges between Claude Opus 4.7 and GPT-5 (via Codex) on 2026-04-17 (`tunnels/2417d8c0c877/` and `tunnels/d14651711e66/` in the workspace log), reviewed with the user afterward.
 
 ### Phase 1 priorities
 
 1. **Signed envelopes (Ed25519).** Close identity forgery. Every message signed by sender's per-agent key; daemon verifies on read. Fixes the trust-on-first-use gap.
 2. **Registration leases + heartbeat/renew.** Register grants a lease for N seconds; agent renews on activity (implicit on any command, or explicit `renew`). Expired leases drop the agent from the registry. Replaces the "no presence" gap — `tunnel <dead-agent>` fails fast instead of hanging the caller.
-3. **Session discovery.** `kopos sessions` (list open tunnels involving caller) and `kopos await-any` (block on the first incoming message from any tunnel). Ranked P0 from direct experience — without these, a receiving agent has no way to discover an inbound tunnel and is forced to grep the workspace filesystem.
+3. **Session discovery.** `lalia sessions` (list open tunnels involving caller) and `lalia await-any` (block on the first incoming message from any tunnel). Ranked P0 from direct experience — without these, a receiving agent has no way to discover an inbound tunnel and is forced to grep the workspace filesystem.
 4. **Minimal room mode.** N-party async pub/sub:
    - Max 8 members per room.
    - Per-sender FIFO ordering (no room-wide total order beyond git commit order).
@@ -231,13 +246,13 @@ Consolidated from two kopos tunnel exchanges between Claude Opus 4.7 and GPT-5 (
 Two layers, as originally designed in `ARCHITECTURE.md`:
 
 - **Registry, cursors, messages, tunnel session metadata → git repo files.** Each `register` writes `registry/<agent>.json` and commits. Same pattern for cursors and room metadata. On daemon startup, the registry is rebuilt in memory by reading `registry/*.json` from the workspace. The git repo is the source of truth for all durable state that is naturally file-per-record.
-- **Write queue → SQLite** at `~/.kopos/queue.db` (WAL). Narrow purpose only: persist messages between "client ack" and "git commit" so a daemon crash does not lose acknowledged-but-uncommitted messages.
+- **Write queue → SQLite** at `~/.lalia/queue.db` (WAL). Narrow purpose only: persist messages between "client ack" and "git commit" so a daemon crash does not lose acknowledged-but-uncommitted messages.
 
 Tunnel runtime state (turn FSM, mailboxes, blocked waiters) stays in memory. On daemon crash, open tunnels die and blocked peers see `peer_closed`. Reopening is cheap.
 
 ### Phase 2 candidates
 
-- **Resumable blocking** (`kopos resume <sid>`). Solves the tool-call timeout wall for long LLM turns. Claude ranks this P0; Codex ranks phase 2. Agreed tiebreak: first observed in-field failure promotes it.
+- **Resumable blocking** (`lalia resume <sid>`). Solves the tool-call timeout wall for long LLM turns. Claude ranks this P0; Codex ranks phase 2. Agreed tiebreak: first observed in-field failure promotes it.
 - **Structured error payloads** with machine-readable fields beyond exit codes.
 - **Tunnel state recovery** across daemon restart (reconstruct from git log + in-memory replay of the last turn marker).
 - **Multi-project isolation** via workspace namespacing.

@@ -1,7 +1,7 @@
-# bash completion for kopos — managed by the kopos repo; reinstalled by
+# bash completion for lalia — managed by the lalia repo; reinstalled by
 # `make install`.
 
-_kopos() {
+_lalia() {
     local cur prev
     COMPREPLY=()
     cur="${COMP_WORDS[COMP_CWORD]}"
@@ -20,12 +20,12 @@ _kopos() {
     case "$cmd" in
         init|prompt)
             if [[ $COMP_CWORD -eq 2 ]]; then
-                COMPREPLY=( $(compgen -W "worker supervisor" -- "$cur") )
+                COMPREPLY=( $(compgen -W "peer worker supervisor" -- "$cur") )
             fi
             ;;
         run)
             if [[ $COMP_CWORD -eq 2 ]]; then
-                COMPREPLY=( $(compgen -W "worker supervisor" -- "$cur") )
+                COMPREPLY=( $(compgen -W "peer worker supervisor" -- "$cur") )
             else
                 COMPREPLY=( $(compgen -W "--claude-code --codex --copilot --force" -- "$cur") )
             fi
@@ -73,7 +73,7 @@ _kopos() {
             ;;
         register)
             if [[ "$prev" == "--role" ]]; then
-                COMPREPLY=( $(compgen -W "supervisor worker" -- "$cur") )
+                COMPREPLY=( $(compgen -W "peer supervisor worker" -- "$cur") )
             else
                 COMPREPLY=( $(compgen -W "--name --as --role --harness --model --project" -- "$cur") )
             fi
@@ -83,13 +83,13 @@ _kopos() {
             ;;
         join|leave|participants)
             if [[ $COMP_CWORD -eq 2 ]]; then
-                local rooms=$(kopos rooms 2>/dev/null | awk '{print $1}')
+                local rooms=$(lalia rooms 2>/dev/null | awk '{print $1}')
                 COMPREPLY=( $(compgen -W "$rooms" -- "$cur") )
             fi
             ;;
         post)
             if [[ $COMP_CWORD -eq 2 ]]; then
-                local rooms=$(kopos rooms 2>/dev/null | awk '{print $1}')
+                local rooms=$(lalia rooms 2>/dev/null | awk '{print $1}')
                 COMPREPLY=( $(compgen -W "$rooms" -- "$cur") )
             else
                 COMPREPLY=( $(compgen -W "--as" -- "$cur") )
@@ -97,7 +97,7 @@ _kopos() {
             ;;
         tell|ask)
             if [[ $COMP_CWORD -eq 2 ]]; then
-                local peers=$(kopos agents 2>/dev/null | awk '{print $1}')
+                local peers=$(lalia agents 2>/dev/null | awk '{print $1}')
                 COMPREPLY=( $(compgen -W "$peers" -- "$cur") )
             else
                 COMPREPLY=( $(compgen -W "--timeout --as" -- "$cur") )
@@ -112,4 +112,4 @@ _kopos() {
     esac
 }
 
-complete -F _kopos kopos
+complete -F _lalia lalia

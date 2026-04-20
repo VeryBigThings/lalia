@@ -78,10 +78,10 @@ func main() {
 }
 
 func usage() {
-	fmt.Fprintf(os.Stderr, `kopos - agent-to-agent coordination
+	fmt.Fprintf(os.Stderr, `lalia - agent-to-agent coordination
 
-If you are an LLM, run "kopos prompt <your-role>" first to load the
-workflow instructions for your role (worker or supervisor). The commands
+If you are an LLM, run "lalia prompt <your-role>" first to load the
+workflow instructions for your role (peer, worker or supervisor). The commands
 listed below are the surface; the prompt tells you how to use them.
 
 Peer-to-peer (English intent → command):
@@ -97,70 +97,70 @@ Rooms (N-party):
   peek R --room = inspect room mailbox
 
 Usage:
-  kopos init <worker|supervisor>       LLM entry point: prints the role
+  lalia init <peer|worker|supervisor>  LLM entry point: prints the role
                                         bootstrap prompt to stdout. Pipe into
                                         the harness instructions file before
                                         the session starts.
-  kopos prompt <worker|supervisor>     LLM entry point (in-session): prints
+  lalia prompt <peer|worker|supervisor> LLM entry point (in-session): prints
                                         the same role prompt so the agent can
                                         reload its workflow context on demand.
-  kopos run <worker|supervisor> --claude-code [args...]
-  kopos run <worker|supervisor> --codex       [args...]
-  kopos run <worker|supervisor> --copilot     [--force] [args...]
+  lalia run <peer|worker|supervisor> --claude-code [args...]
+  lalia run <peer|worker|supervisor> --codex       [args...]
+  lalia run <peer|worker|supervisor> --copilot     [--force] [args...]
 
-  kopos register [--name <name>] [--harness H] [--model M] [--project P] [--role supervisor|worker]
-  kopos unregister                      drop yourself from the registry
-  kopos agents
-  kopos channels                        list your peer-pair channels
-  kopos nickname [<nick> [<address>]] [-d <nick>] [--follow]
+  lalia register [--name <name>] [--harness H] [--model M] [--project P] [--role peer|supervisor|worker]
+  lalia unregister                      drop yourself from the registry
+  lalia agents
+  lalia channels                        list your peer-pair channels
+  lalia nickname [<nick> [<address>]] [-d <nick>] [--follow]
 
-  kopos tell <peer> "<msg>"             async, no reply expected
-  kopos ask  <peer> "<msg>" [--timeout N]   send then block for reply
-  kopos read <peer|room> [--room] [--timeout N]   consume next inbound
-  kopos peek <peer|room> [--room]       non-destructive inspect
-  kopos read-any [--timeout N]          block on ANY channel or room
+  lalia tell <peer> "<msg>"             async, no reply expected
+  lalia ask  <peer> "<msg>" [--timeout N]   send then block for reply
+  lalia read <peer|room> [--room] [--timeout N]   consume next inbound
+  lalia peek <peer|room> [--room]       non-destructive inspect
+  lalia read-any [--timeout N]          block on ANY channel or room
 
-  kopos rooms                           list known rooms
-  kopos rooms gc                        supervisor: archive rooms for merged
+  lalia rooms                           list known rooms
+  lalia rooms gc                        supervisor: archive rooms for merged
                                         tasks in lists you supervise
-  kopos room create <name> [--desc <text>]
-  kopos join <room>
-  kopos leave <room>
-  kopos participants <room>
-  kopos post <room> "<msg>"             async broadcast
+  lalia room create <name> [--desc <text>]
+  lalia join <room>
+  lalia leave <room>
+  lalia participants <room>
+  lalia post <room> "<msg>"             async broadcast
 
-  kopos history <peer|room> [--room] [--since SEQ] [--limit N]
-  kopos renew                           extend caller's lease
-  kopos stop
+  lalia history <peer|room> [--room] [--since SEQ] [--limit N]
+  lalia renew                           extend caller's lease
+  lalia stop
 
 Tasks (supervisor publishes, workers pull):
-  kopos task publish --file <payload.json>   one call: worktrees + rooms + bundles
-  kopos task bulletin [--project <id>]       list open tasks workers can claim
-  kopos task claim <slug> [--project <id>]   atomic: owner=self, status=in-progress, join room
-  kopos task status <slug> <in-progress|ready|blocked|merged> [--project <id>]
-  kopos task unassign <slug> [--project <id>]
-  kopos task reassign <slug> <agent> [--project <id>]
-  kopos task unpublish <slug> [--force] [--wipe-worktree] [--evict-owner] [--project <id>]
+  lalia task publish --file <payload.json>   one call: worktrees + rooms + bundles
+  lalia task bulletin [--project <id>]       list open tasks workers can claim
+  lalia task claim <slug> [--project <id>]   atomic: owner=self, status=in-progress, join room
+  lalia task status <slug> <in-progress|ready|blocked|merged> [--project <id>]
+  lalia task unassign <slug> [--project <id>]
+  lalia task reassign <slug> <agent> [--project <id>]
+  lalia task unpublish <slug> [--force] [--wipe-worktree] [--evict-owner] [--project <id>]
                                              retract a published task; worktree preserved by default
-  kopos task show [<slug>] [--project <id>]
-  kopos task list
-  kopos task handoff <new-supervisor> [--project <id>]
-  kopos protocol                        print agent-facing protocol guide
-  kopos --version
+  lalia task show [<slug>] [--project <id>]
+  lalia task list
+  lalia task handoff <new-supervisor> [--project <id>]
+  lalia protocol                        print agent-facing protocol guide
+  lalia --version
 
 Run safety:
-  "kopos run" writes the role prompt into the harness's instructions file
-  (KOPOS.md, AGENTS.md, or .github/copilot-instructions.md). Overwrite is
-  refused when that file already exists and does not carry a kopos marker.
-  Pass --force to override. "kopos prompt" and "kopos init" never touch
+  "lalia run" writes the role prompt into the harness's instructions file
+  (LALIA.md, AGENTS.md, or .github/copilot-instructions.md). Overwrite is
+  refused when that file already exists and does not carry a lalia marker.
+  Pass --force to override. "lalia prompt" and "lalia init" never touch
   the filesystem — they print the prompt to stdout.
 
 Identity:
-  On register, kopos generates an Ed25519 keypair for your name and assigns
+  On register, lalia generates an Ed25519 keypair for your name and assigns
   a stable ULID agent_id. The agent_id persists across re-registrations as
   long as the keypair file is intact. Rich metadata (project, branch, harness,
   model) is auto-detected from git and the caller's environment.
-  Public key lives in the registry; private key at ~/.kopos/keys/<name>.key
+  Public key lives in the registry; private key at ~/.lalia/keys/<name>.key
   (mode 0600). Every authenticated request is signed by your key and
   verified by the daemon. Another process passing --as <your-name> without
   your key will be rejected with exit code 6.
@@ -172,17 +172,17 @@ Identity:
     name@project:branch     fully-qualified, branch scoped
     name                    bare name (error if ambiguous)
 
-  Nicknames (stored at ~/.kopos/nicknames.json):
-    kopos nickname <nick> <address>        assign (stable by default)
-    kopos nickname --follow <nick> <addr>  assign (follows address re-resolution)
-    kopos nickname <nick>                  show current resolution
-    kopos nickname                         list all
-    kopos nickname -d <nick>              delete
+  Nicknames (stored at ~/.lalia/nicknames.json):
+    lalia nickname <nick> <address>        assign (stable by default)
+    lalia nickname --follow <nick> <addr>  assign (follows address re-resolution)
+    lalia nickname <nick>                  show current resolution
+    lalia nickname                         list all
+    lalia nickname -d <nick>              delete
 
 Environment:
-  KOPOS_NAME       caller identity for all commands (override per-call with --as)
-  KOPOS_HOME       socket/pid/keys dir (default ~/.kopos)
-  KOPOS_WORKSPACE  git repo for transcripts (default ~/.local/state/kopos/workspace)
+  LALIA_NAME       caller identity for all commands (override per-call with --as)
+  LALIA_HOME       socket/pid/keys dir (default ~/.lalia)
+  LALIA_WORKSPACE  git repo for transcripts (default ~/.local/state/lalia/workspace)
 
 Exit codes:
   0  ok
@@ -193,6 +193,6 @@ Exit codes:
   5  not_found — peer or room does not exist
   6  unauthorized — signature invalid or caller not registered
 
-Run "kopos protocol" for the full agent-facing guide.
+Run "lalia protocol" for the full agent-facing guide.
 `)
 }

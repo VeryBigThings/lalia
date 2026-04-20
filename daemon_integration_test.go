@@ -30,20 +30,20 @@ func setupIntegrationEnv(t *testing.T) string {
 	t.Cleanup(func() { _ = os.RemoveAll(base) })
 
 	home := filepath.Join(base, "h")
-	koposHome := filepath.Join(base, "lh")
+	laliaHome := filepath.Join(base, "lh")
 	workspace := filepath.Join(base, "w")
 	if err := os.MkdirAll(home, 0700); err != nil {
 		t.Fatalf("mkdir home: %v", err)
 	}
 	t.Setenv("HOME", home)
-	t.Setenv("KOPOS_HOME", koposHome)
-	t.Setenv("KOPOS_WORKSPACE", workspace)
-	return koposHome
+	t.Setenv("LALIA_HOME", laliaHome)
+	t.Setenv("LALIA_WORKSPACE", workspace)
+	return laliaHome
 }
 
-func stopDaemonForHome(t *testing.T, koposHome string) {
+func stopDaemonForHome(t *testing.T, laliaHome string) {
 	t.Helper()
-	pidFile := filepath.Join(koposHome, "pid")
+	pidFile := filepath.Join(laliaHome, "pid")
 	data, err := os.ReadFile(pidFile)
 	if err != nil {
 		return
@@ -58,7 +58,7 @@ func stopDaemonForHome(t *testing.T, koposHome string) {
 	}
 	_ = proc.Signal(syscall.SIGTERM)
 
-	sock := filepath.Join(koposHome, "sock")
+	sock := filepath.Join(laliaHome, "sock")
 	deadline := time.Now().Add(3 * time.Second)
 	for time.Now().Before(deadline) {
 		if _, err := os.Stat(sock); os.IsNotExist(err) {
@@ -86,8 +86,8 @@ type requestResult struct {
 // register, tell, read, consecutive tells without turn enforcement, and
 // read-any across channels.
 func TestIntegrationChannelFlow(t *testing.T) {
-	koposHome := setupIntegrationEnv(t)
-	defer stopDaemonForHome(t, koposHome)
+	laliaHome := setupIntegrationEnv(t)
+	defer stopDaemonForHome(t, laliaHome)
 
 	ra := mustRequest(t, "register", map[string]any{"name": "alice", "pid": float64(101)})
 	if !ra.OK {
@@ -182,8 +182,8 @@ func TestIntegrationChannelFlow(t *testing.T) {
 
 // TestIntegrationRoomFlow verifies room post + read + read-any.
 func TestIntegrationRoomFlow(t *testing.T) {
-	koposHome := setupIntegrationEnv(t)
-	defer stopDaemonForHome(t, koposHome)
+	laliaHome := setupIntegrationEnv(t)
+	defer stopDaemonForHome(t, laliaHome)
 
 	mustRequest(t, "register", map[string]any{"name": "alice", "pid": float64(201)})
 	mustRequest(t, "register", map[string]any{"name": "bob", "pid": float64(202)})
@@ -211,8 +211,8 @@ func TestIntegrationRoomFlow(t *testing.T) {
 // TestIntegrationUnauthorizedCaller: an unregistered agent is rejected on
 // authenticated ops.
 func TestIntegrationUnauthorizedCaller(t *testing.T) {
-	koposHome := setupIntegrationEnv(t)
-	defer stopDaemonForHome(t, koposHome)
+	laliaHome := setupIntegrationEnv(t)
+	defer stopDaemonForHome(t, laliaHome)
 
 	mustRequest(t, "register", map[string]any{"name": "alice", "pid": float64(301)})
 	// ghost is not registered and has no key file; the client refuses to

@@ -40,7 +40,7 @@ func seedRoomTranscript(t *testing.T, workspace, room string, msgs []RoomMessage
 // row → loadRooms must populate r.log with 2 entries in seq order and r.seq==2.
 func TestLoadRoomsRehydratesLogAndSeq(t *testing.T) {
 	workspace := t.TempDir()
-	t.Setenv("KOPOS_WORKSPACE", workspace)
+	t.Setenv("LALIA_WORKSPACE", workspace)
 	q, _ := mustOpenTestQueue(t)
 
 	now := time.Now().Truncate(time.Second)
@@ -93,7 +93,7 @@ func TestLoadRoomsRehydratesLogAndSeq(t *testing.T) {
 // directory on disk → loadRooms must succeed and leave an empty log.
 func TestLoadRoomsHandlesMissingTranscriptDir(t *testing.T) {
 	workspace := t.TempDir()
-	t.Setenv("KOPOS_WORKSPACE", workspace)
+	t.Setenv("LALIA_WORKSPACE", workspace)
 	q, _ := mustOpenTestQueue(t)
 
 	now := time.Now()
@@ -131,7 +131,7 @@ func TestLoadRoomsHandlesMissingTranscriptDir(t *testing.T) {
 // file → only the valid message lands in r.log.
 func TestLoadRoomsSkipsMalformedTranscriptFiles(t *testing.T) {
 	workspace := t.TempDir()
-	t.Setenv("KOPOS_WORKSPACE", workspace)
+	t.Setenv("LALIA_WORKSPACE", workspace)
 	q, _ := mustOpenTestQueue(t)
 
 	now := time.Now().Truncate(time.Second)
@@ -223,7 +223,7 @@ func TestParseRoomMsgFileRoundTrip(t *testing.T) {
 // newRoom) to SQLite so that loadRooms can reconstruct them after restart.
 func TestEnsureRoomWithMembersPersistedToSQLite(t *testing.T) {
 	workspace := t.TempDir()
-	t.Setenv("KOPOS_WORKSPACE", workspace)
+	t.Setenv("LALIA_WORKSPACE", workspace)
 	q, _ := mustOpenTestQueue(t)
 
 	s := newFixtureState()
@@ -275,10 +275,10 @@ func contains(slice []string, s string) bool {
 }
 
 // TestRepublishBundleSurvivesRestart: publish → post follow-up → daemon restart
-// → kopos history returns both messages.
+// → lalia history returns both messages.
 func TestRepublishBundleSurvivesRestart(t *testing.T) {
-	koposHome := setupIntegrationEnv(t)
-	defer stopDaemonForHome(t, koposHome)
+	laliaHome := setupIntegrationEnv(t)
+	defer stopDaemonForHome(t, laliaHome)
 
 	repoRoot := mustInitRepoForIntegration(t)
 
@@ -314,7 +314,7 @@ func TestRepublishBundleSurvivesRestart(t *testing.T) {
 		t.Fatalf("post follow-up: %+v", post)
 	}
 
-	restartDaemon(t, koposHome)
+	restartDaemon(t, laliaHome)
 
 	// Re-register after restart.
 	mustRequest(t, "register", map[string]any{

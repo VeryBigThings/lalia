@@ -1,14 +1,17 @@
-# Kopos
+# Lalia
 
 `λέσχη` — a CLI that lets coding agents talk to each other.
 
-Kopos is a local coordination tool for multi-agent workflows. Two agents
-running in separate harnesses (Claude Code, Codex, Cursor, Aider, …) can
-open a direct synchronous tunnel between them. Every exchange is recorded
-to a git-backed transcript. Rooms provide N-party async coordination.
+Lalia is a local coordination tool for multi-agent workflows. Agents running
+in separate harnesses (Claude Code, Codex, Copilot, Cursor, Aider, …) reach
+each other through two transports: **rooms** for N-party pub/sub coordination
+and **channels** for 1:1 peer messaging. Every message is signed, ordered,
+and committed to a git-backed transcript. Rooms and channels both survive
+daemon restarts.
 
-Status: **MVP+**. Tunnel and room transports, auto-spawned daemon,
-git-backed log, basic registry. Tested end-to-end between Claude Code and Codex.
+Status: in use. Rooms, channels, a durable write queue, Ed25519-signed
+identity, SQLite-backed mailbox persistence, harness bootstrap helpers, and
+a supervisor/worker task primitive are all shipped and tested.
 
 ## Install
 
@@ -16,12 +19,12 @@ Requires Go 1.21+ to build.
 
 ```
 git clone <this repo>
-cd kopos
+cd lalia
 make install
 ```
 
-The `install` target builds `bin/kopos`, stamps the version from
-`git describe`, copies to `$(PREFIX)/bin/kopos`, and kicks the running
+The `install` target builds `bin/lalia`, stamps the version from
+`git describe`, copies to `$(PREFIX)/bin/lalia`, and kicks the running
 daemon so the next invocation picks up the new binary.
 
 PREFIX is auto-detected in this order:
@@ -34,68 +37,121 @@ Override with `make install PREFIX=/custom/path`.
 Other targets:
 
 ```
-make build       # build bin/kopos
+make build       # build bin/lalia
 make test        # go test ./...
-make uninstall   # remove $(PREFIX)/bin/kopos
+make uninstall   # remove $(PREFIX)/bin/lalia
 make reload      # kick the daemon without reinstalling
 make clean       # remove bin/
 ```
 
-No runtime dependencies. The daemon auto-spawns on first use.
-Registered agents and their keypairs persist across reloads (keys at
-`~/.kopos/keys/`, registry at `~/.local/state/kopos/workspace/registry/`).
-Open tunnels die on daemon restart; peers see `peer_closed` and can
-reopen.
+No runtime dependencies. The daemon auto-spawns on first use. Registered
+agents and their keypairs persist across reloads. Default paths:
+
+- socket + pid + keys: `~/.lalia/` (override with `LALIA_HOME`)
+- git transcript workspace: `~/.local/state/lalia/workspace` (override with `LALIA_WORKSPACE`)
+- nicknames: `~/.lalia/nicknames.json`
 
 ## Quickstart
 
-Terminal A (initiator):
+Terminal A:
 
 ```sh
-export KOPOS_NAME=claude
-kopos register
-kopos tunnel codex               # prints sid=<hex>
-kopos send <sid> "hi codex"      # blocks; returns codex's reply
-kopos send <sid> "follow-up"     # blocks; returns codex's reply
-kopos close <sid>
+export LALIA_NAME=alice
+lalia register
+lalia tell bob "starting review of feat/errors"
 ```
 
-Terminal B (responder):
+Terminal B:
 
 ```sh
-export KOPOS_NAME=codex
-kopos register
-kopos await <sid>                # blocks; returns claude's first message
-kopos send <sid> "hello claude"  # blocks; returns claude's follow-up
-# next await/send returns exit 3 (peer_closed) after claude closes
+export LALIA_NAME=bob
+lalia register
+lalia read-any --timeout 300
+# blocks, then prints kind=peer target=alice and the message body
+lalia tell alice "on it"
+```
+
+Room coordination:
+
+```sh
+lalia room create review --desc "review thread"
+lalia join review
+lalia post review "feat/errors ready for review at <sha>"
+lalia read review --room --timeout 300    # drains pending, or blocks
 ```
 
 Inspect the transcript:
 
 ```sh
-git -C ~/.kopos/workspace log --oneline tunnels/<sid>/
+git -C ~/.local/state/lalia/workspace log --oneline peers/
+git -C ~/.local/state/lalia/workspace log --oneline rooms/review/
 ```
 
 ## Commands
 
+### Peer-to-peer (channels)
+
 | Command | Description |
 |---|---|
-| `kopos register [--name N]` | Register caller (uses `$KOPOS_NAME` if `--name` omitted). Idempotent per pid. |
-| `kopos agents` | List registered agents. |
-| `kopos rooms` | List rooms. |
-| `kopos room create <name> [--desc ...]` | Create a room (creator auto-joins). |
-| `kopos join <room>` | Join an existing room (max 8 members). |
-| `kopos leave <room>` | Leave a room. |
-| `kopos participants <room>` | Show room members and pending counts. |
-| `kopos post <room> "msg"` | Publish to all other room members; returns room/seq. |
-| `kopos inbox [<room>]` | Drain pending room messages (all joined rooms or one). |
-| `kopos peek <room>` | Read pending room messages without draining. |
-| `kopos tunnel <peer>` | Open a tunnel to `<peer>`. Prints `sid=…`. |
-| `kopos send <sid> "msg" [--timeout N]` | Append message, block until peer replies. Default timeout 300s. |
-| `kopos await <sid> [--timeout N]` | Block until peer sends. |
-| `kopos close <sid>` | Hang up. Peer's blocked call returns exit 3. |
-| `kopos stop` | Shut down daemon. |
-| `kopos protocol` | Print the agent-facing protocol guide. Paste this into your harness's config file (`CLAUDE.md`, `AGENTS.md`, etc.) so the LLM knows how to use kopos. |
+| `lalia tell <peer> "<msg>"` | One-way message; does not block. |
+| `lalia ask <peer> "<msg>" [--timeout N]` | Send then block for the peer's reply. |
+| `lalia read <peer> [--timeout N]` | Consume next inbound from `<peer>`. Blocks up to timeout. |
+| `lalia peek <peer>` | Non-destructive inspect of pending mailbox. |
+| `lalia read-any [--timeout N]` | Block on any channel or room the caller is in. |
+| `lalia channels` | List the caller's active peer-pair channels. |
+
+### Rooms (N-party)
+
+| Command | Description |
+|---|---|
+| `lalia rooms` | List known rooms. |
+| `lalia room create <name> [--desc ...]` | Create a room (creator auto-joins). |
+| `lalia join <room>` | Subscribe (max 8 members). |
+| `lalia leave <room>` | Unsubscribe. |
+| `lalia participants <room>` | Members and pending counts. |
+| `lalia post <room> "<msg>"` | Broadcast to all other members. |
+| `lalia read <room> --room [--timeout N]` | Drain pending; blocks up to timeout for the first arrival. |
+| `lalia peek <room> --room` | Inspect without draining. |
+| `lalia rooms gc` | Supervisor-only: archive rooms for merged tasks. |
+
+### Identity
+
+| Command | Description |
+|---|---|
+| `lalia register [--name N] [--role supervisor\|worker] [--project P]` | Register caller. Generates Ed25519 keypair on first call; reuses it on re-register. Captures project/branch/worktree from cwd. |
+| `lalia unregister` | Leaves rooms, releases pending reads, deletes the private key. Re-register generates a fresh key. |
+| `lalia agents` | List registered agents with lease status. |
+| `lalia renew` | Extend caller's lease (any command also renews; leases are 60 min). |
+| `lalia nickname [<nick> [<address>]]` | Assign, list, or delete personal nicknames. `--follow` tracks rebinding across re-register. |
+
+### Tasks (supervisor/worker)
+
+| Command | Description |
+|---|---|
+| `lalia task publish --file <payload.json>` | Supervisor: atomically create N worktrees + rooms + bundle posts. |
+| `lalia task bulletin [--project <id>]` | List open tasks available to claim. |
+| `lalia task claim <slug>` | Worker: atomic flip to in-progress, auto-join the slug's room. |
+| `lalia task status <slug> <in-progress\|ready\|blocked\|merged>` | Mutate caller's own row. |
+| `lalia task show [<slug>]` / `task list` | Inspect tasks. |
+| `lalia task unassign / reassign / unpublish / handoff` | Supervisor mutations. |
+
+### Harness integration
+
+| Command | Description |
+|---|---|
+| `lalia init <worker\|supervisor>` | Print the role bootstrap prompt to stdout. |
+| `lalia prompt <worker\|supervisor>` | Alias of `init`; intended for in-session reload. |
+| `lalia run <worker\|supervisor> --claude-code\|--codex\|--copilot [args...]` | Write the role prompt to the harness's instructions file and exec the harness. `--force` overrides overwrite refusal. |
+
+### Introspection & control
+
+| Command | Description |
+|---|---|
+| `lalia history <peer\|room> [--room] [--since SEQ] [--limit N]` | Replay transcript. |
+| `lalia protocol` | Print the agent-facing protocol guide. |
+| `lalia help` | Print this surface. |
+| `lalia stop` | Shut down daemon. |
+| `lalia --version` | Print build version. |
 
 ## Exit codes
 
@@ -103,50 +159,61 @@ git -C ~/.kopos/workspace log --oneline tunnels/<sid>/
 |---|---|
 | 0 | Success |
 | 1 | Generic error |
-| 2 | Timeout — tunnel still open; call `send`/`await` again to resume |
-| 3 | `peer_closed` — peer hung up; conversation over |
-| 4 | `not_your_turn` — tried to send when await is required, or vice versa |
-| 5 | Not found — sid or peer name does not exist |
+| 2 | Timeout — `read` returned empty; call again to resume |
+| 3 | Peer closed / no route |
+| 4 | Protocol violation |
+| 5 | Not found — peer name, room, or resource does not exist |
+| 6 | Signature verification failed |
+| 7 | Role/authorization gated |
+
+Structured error details (machine-readable `reason`, `retry_hint`, `context`)
+are carried in the response payload alongside the exit code.
 
 ## How it works
 
-- Every `kopos` invocation connects to a local daemon over a unix socket
-  at `~/.kopos/sock`. The daemon is auto-spawned the first time it's
-  needed; no manual start step.
-- Tunnel state (turn, sequence, waiters) lives in the daemon's memory.
-- Every message is committed to `~/.kopos/workspace/` — a git repo
-  dedicated to kopos, never pointed at a project repo. Override the
-  location with `KOPOS_WORKSPACE=/path/to/repo`.
-- Turn alternation is enforced in one place. Clients cannot deadlock by
-  both awaiting simultaneously — the daemon returns `not_your_turn` fast.
+- Every `lalia` invocation connects to a local daemon over a unix socket
+  at `~/.lalia/sock`. The daemon auto-spawns on first use; no explicit
+  start step.
+- Channels are per-peer-pair. `tell`/`ask`/`read`/`peek`/`read-any` all
+  operate on a single implicit channel between the two named peers.
+- Rooms are named, explicit membership, bounded per-subscriber mailboxes
+  with drop-oldest overflow semantics.
+- Every message is committed to the workspace git repo. ULID filenames
+  are globally unique by construction, so cross-machine `git pull` never
+  collides.
+- Mailboxes survive daemon restart: unread messages are replayed from
+  SQLite on boot before the daemon accepts new connections. The SQLite
+  DB is a narrow write queue + mailbox sidecar; the git repo remains the
+  audit trail.
+- Identity is a stable ULID `agent_id` with an Ed25519 keypair. Every
+  signed request is verified by the daemon; name-to-agent resolution is
+  explicit (`<name>`, `<name>@<project>`, `<name>@<project>:<branch>`,
+  ULID, or nickname).
 
-Full architecture: see [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md).
+Full architecture: [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md).
 
 ## Documentation
 
 | File | Purpose |
 |---|---|
-| [docs/IDEA.md](./docs/IDEA.md) | What kopos is, why it exists, how it fits with other tools. |
-| [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md) | Full system design, including post-MVP features not yet built. |
-| [docs/MVP.md](./docs/MVP.md) | What's in the MVP, build order, test plan, post-MVP roadmap. |
+| [docs/IDEA.md](./docs/IDEA.md) | What lalia is, why it exists, how it fits alongside other tools. |
+| [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md) | System design as shipped. |
+| [docs/IDENTITY.md](./docs/IDENTITY.md) | Identity model: ULIDs, resolver grammar, nicknames. |
+| [docs/CHANNELS.md](./docs/CHANNELS.md) | Historical: the post-tunnel messaging redesign. |
+| [docs/MVP.md](./docs/MVP.md) | Historical: the original MVP build plan. |
+| [BACKLOG.md](./BACKLOG.md) | Active and historical workstreams. |
 
 ## Integrating with your harness
 
-Paste the output of `kopos protocol` into your agent's startup
-instructions. Tell your harness to run `kopos register` at session start
-and `kopos unregister` at session end. Agents will know how to use the
-rest from the protocol guide.
+The simplest path is `lalia run <role> --<harness>`: lalia writes the
+role prompt into the harness's instructions file and execs the harness.
+If you drive the harness yourself, `lalia init <role>` prints the prompt
+to stdout for you to pipe into the instructions file manually, and
+`lalia protocol` prints the agent-facing protocol guide any harness can
+consume.
 
-## Limitations (MVP)
-
-- Identity is trust-on-first-use. Any local process can claim any name.
-  Post-MVP: Ed25519 signing.
-- No heartbeats. A crashed agent's registration stays until manually
-  cleared. Post-MVP: presence tracking.
-- Single machine only. Cross-machine sync via `git remote` is trivial to
-  add but not done.
-- A daemon crash between request ack and git commit loses at most one
-  in-flight message. Post-MVP: persistent write queue.
+Tell your harness to run `lalia register` at session start and
+`lalia unregister` at session end.
 
 ## Name
 

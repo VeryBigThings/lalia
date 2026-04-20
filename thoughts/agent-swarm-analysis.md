@@ -47,9 +47,9 @@
 
 ---
 
-## Contrast with kopos
+## Contrast with lalia
 
-| Dimension | agent-swarm | kopos |
+| Dimension | agent-swarm | lalia |
 |---|---|---|
 | Transport | MCP over HTTP/stdio | UDS + JSON ops |
 | Auth | X-Agent-ID header (bearer) | Ed25519 per-request signatures + lease |
@@ -63,7 +63,7 @@
 | Supervision | Hooks enforce cancel, loop detect, heartbeat | Role-based gating on ops |
 | Dep graph | First-class `dependsOn` | None |
 
-**What kopos could steal without changing identity**:
+**What lalia could steal without changing identity**:
 
 1. **First-class `dependsOn` on tasks** — lets the supervisor sequence multi-stage work without manual room chatter.
 2. **`offered` state + accept/reject** as a middle ground between "published" and "claimed" — useful when the supervisor wants to name a preferred worker but still allow decline.

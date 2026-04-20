@@ -1,20 +1,20 @@
-#compdef kopos
-# zsh completion for kopos — managed by the kopos repo; reinstalled by
+#compdef lalia
+# zsh completion for lalia — managed by the lalia repo; reinstalled by
 # `make install`.
 
-_kopos_agents() {
+_lalia_agents() {
     local -a names
-    names=(${(f)"$(kopos agents 2>/dev/null | awk '{print $1}')"})
+    names=(${(f)"$(lalia agents 2>/dev/null | awk '{print $1}')"})
     _describe -t agents 'agent' names
 }
 
-_kopos_rooms_list() {
+_lalia_rooms_list() {
     local -a rooms
-    rooms=(${(f)"$(kopos rooms 2>/dev/null | awk '{print $1}')"})
+    rooms=(${(f)"$(lalia rooms 2>/dev/null | awk '{print $1}')"})
     _describe -t rooms 'room' rooms
 }
 
-_kopos() {
+_lalia() {
     local curcontext="$curcontext" state line
     typeset -A opt_args
 
@@ -53,7 +53,7 @@ _kopos() {
                 'help:show usage'
                 '--version:print binary version'
             )
-            _describe -t commands 'kopos command' commands
+            _describe -t commands 'lalia command' commands
             ;;
         args)
             case "$words[1]" in
@@ -68,19 +68,19 @@ _kopos() {
                         '--desc[room description]:desc:'
                     ;;
                 init|prompt)
-                    _arguments '1:role:(worker supervisor)'
+                    _arguments '1:role:(peer worker supervisor)'
                     ;;
                 run)
                     _arguments \
-                        '1:role:(worker supervisor)' \
+                        '1:role:(peer worker supervisor)' \
                         '*:harness flag:(--claude-code --codex --copilot --force)'
                     ;;
                 register)
                     _arguments \
                         '--name[caller name]:name:' \
                         '--as[override caller identity]:name:' \
-                        '--role[caller role]:role:(supervisor worker)' \
-                        '--harness[harness id]:harness:' \
+                        '--role[caller role]:role:(peer supervisor worker)' \
+...                        '--harness[harness id]:harness:' \
                         '--model[model id]:model:' \
                         '--project[project id]:project:'
                     ;;
@@ -90,17 +90,17 @@ _kopos() {
                         '-d[delete nickname]:nickname:'
                     ;;
                 join|leave|participants)
-                    _kopos_rooms_list
+                    _lalia_rooms_list
                     ;;
                 post)
                     _arguments \
-                        '1:room:_kopos_rooms_list' \
+                        '1:room:_lalia_rooms_list' \
                         '2:body:' \
                         '--as[override caller]:name:'
                     ;;
                 tell|ask)
                     _arguments \
-                        '1:peer:_kopos_agents' \
+                        '1:peer:_lalia_agents' \
                         '2:body:' \
                         '--timeout[seconds]:timeout:' \
                         '--as[override caller]:name:'
@@ -153,7 +153,7 @@ _kopos() {
                                 reassign)
                                     _arguments \
                                         '1:slug:' \
-                                        '2:agent:_kopos_agents' \
+                                        '2:agent:_lalia_agents' \
                                         '--project[id]:id:'
                                     ;;
                                 unassign)
@@ -163,12 +163,12 @@ _kopos() {
                                     _arguments \
                                         '1:slug:' \
                                         '--force[allow even if owned or room has traffic]' \
-                                        '--wipe-worktree[also remove the worktree kopos created]' \
+                                        '--wipe-worktree[also remove the worktree lalia created]' \
                                         '--evict-owner[override the live-owner gate during --wipe-worktree]' \
                                         '--project[id]:id:'
                                     ;;
                                 handoff)
-                                    _arguments '1:new-supervisor:_kopos_agents' '--project[id]:id:'
+                                    _arguments '1:new-supervisor:_lalia_agents' '--project[id]:id:'
                                     ;;
                                 show)
                                     _arguments '1:slug:' '--project[id]:id:'
@@ -185,4 +185,4 @@ _kopos() {
     esac
 }
 
-_kopos "$@"
+_lalia "$@"

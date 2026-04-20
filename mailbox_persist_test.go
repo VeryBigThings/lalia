@@ -37,8 +37,8 @@ func mustInitRepoForIntegration(t *testing.T) string {
 // Guards the invariant that archive state lives in SQLite, not derived from
 // task status at boot.
 func TestRoomsGCArchivePersistsAcrossRestart(t *testing.T) {
-	koposHome := setupIntegrationEnv(t)
-	defer stopDaemonForHome(t, koposHome)
+	laliaHome := setupIntegrationEnv(t)
+	defer stopDaemonForHome(t, laliaHome)
 
 	repoRoot := mustInitRepoForIntegration(t)
 
@@ -71,7 +71,7 @@ func TestRoomsGCArchivePersistsAcrossRestart(t *testing.T) {
 		t.Fatalf("rooms_gc: %+v", gc)
 	}
 
-	restartDaemon(t, koposHome)
+	restartDaemon(t, laliaHome)
 
 	mustRequest(t, "register", map[string]any{
 		"name": "sup", "pid": float64(9003), "role": "supervisor",
@@ -87,15 +87,15 @@ func TestRoomsGCArchivePersistsAcrossRestart(t *testing.T) {
 
 // restartDaemon stops the current daemon and triggers a fresh one on the
 // next request() call. Returns once the old socket is gone.
-func restartDaemon(t *testing.T, koposHome string) {
+func restartDaemon(t *testing.T, laliaHome string) {
 	t.Helper()
-	stopDaemonForHome(t, koposHome)
+	stopDaemonForHome(t, laliaHome)
 }
 
 // TestMailboxPeerSurvivesRestart: tell → restart → read returns the message.
 func TestMailboxPeerSurvivesRestart(t *testing.T) {
-	koposHome := setupIntegrationEnv(t)
-	defer stopDaemonForHome(t, koposHome)
+	laliaHome := setupIntegrationEnv(t)
+	defer stopDaemonForHome(t, laliaHome)
 
 	mustRequest(t, "register", map[string]any{"name": "alice", "pid": float64(1001)})
 	mustRequest(t, "register", map[string]any{"name": "bob", "pid": float64(1002)})
@@ -105,7 +105,7 @@ func TestMailboxPeerSurvivesRestart(t *testing.T) {
 		t.Fatalf("tell failed: %+v", tell)
 	}
 
-	restartDaemon(t, koposHome)
+	restartDaemon(t, laliaHome)
 
 	// Re-register so agents are known to the new daemon (also renews lease).
 	mustRequest(t, "register", map[string]any{"name": "alice", "pid": float64(1003)})
@@ -123,8 +123,8 @@ func TestMailboxPeerSurvivesRestart(t *testing.T) {
 
 // TestMailboxRoomSurvivesRestart: post → restart → member read returns the message.
 func TestMailboxRoomSurvivesRestart(t *testing.T) {
-	koposHome := setupIntegrationEnv(t)
-	defer stopDaemonForHome(t, koposHome)
+	laliaHome := setupIntegrationEnv(t)
+	defer stopDaemonForHome(t, laliaHome)
 
 	mustRequest(t, "register", map[string]any{"name": "alice", "pid": float64(2001)})
 	mustRequest(t, "register", map[string]any{"name": "bob", "pid": float64(2002)})
@@ -132,7 +132,7 @@ func TestMailboxRoomSurvivesRestart(t *testing.T) {
 	mustRequest(t, "join", map[string]any{"from": "bob", "room": "general"})
 	mustRequest(t, "post", map[string]any{"from": "alice", "room": "general", "body": "room msg after restart"})
 
-	restartDaemon(t, koposHome)
+	restartDaemon(t, laliaHome)
 
 	mustRequest(t, "register", map[string]any{"name": "alice", "pid": float64(2003)})
 	mustRequest(t, "register", map[string]any{"name": "bob", "pid": float64(2004)})
@@ -153,8 +153,8 @@ func TestMailboxRoomSurvivesRestart(t *testing.T) {
 
 // TestMailboxNoDoubleDelivery: tell → read → restart → next read is empty.
 func TestMailboxNoDoubleDelivery(t *testing.T) {
-	koposHome := setupIntegrationEnv(t)
-	defer stopDaemonForHome(t, koposHome)
+	laliaHome := setupIntegrationEnv(t)
+	defer stopDaemonForHome(t, laliaHome)
 
 	mustRequest(t, "register", map[string]any{"name": "alice", "pid": float64(3001)})
 	mustRequest(t, "register", map[string]any{"name": "bob", "pid": float64(3002)})
@@ -170,7 +170,7 @@ func TestMailboxNoDoubleDelivery(t *testing.T) {
 		t.Fatalf("expected 'read before restart', got %q", body)
 	}
 
-	restartDaemon(t, koposHome)
+	restartDaemon(t, laliaHome)
 
 	mustRequest(t, "register", map[string]any{"name": "alice", "pid": float64(3003)})
 	mustRequest(t, "register", map[string]any{"name": "bob", "pid": float64(3004)})
@@ -190,8 +190,8 @@ func TestMailboxNoDoubleDelivery(t *testing.T) {
 // TestMailboxRoomOverflowSurvivesRestart: drop-oldest counter is preserved
 // across a daemon restart.
 func TestMailboxRoomOverflowSurvivesRestart(t *testing.T) {
-	koposHome := setupIntegrationEnv(t)
-	defer stopDaemonForHome(t, koposHome)
+	laliaHome := setupIntegrationEnv(t)
+	defer stopDaemonForHome(t, laliaHome)
 
 	mustRequest(t, "register", map[string]any{"name": "alice", "pid": float64(4001)})
 	mustRequest(t, "register", map[string]any{"name": "bob", "pid": float64(4002)})
@@ -214,7 +214,7 @@ func TestMailboxRoomOverflowSurvivesRestart(t *testing.T) {
 		t.Fatalf("expected 2 dropped before restart, got %v", droppedBefore)
 	}
 
-	restartDaemon(t, koposHome)
+	restartDaemon(t, laliaHome)
 
 	mustRequest(t, "register", map[string]any{"name": "alice", "pid": float64(4003)})
 	mustRequest(t, "register", map[string]any{"name": "bob", "pid": float64(4004)})
@@ -245,8 +245,8 @@ func TestMailboxRoomOverflowSurvivesRestart(t *testing.T) {
 // TestMailboxConcurrentDeliveryNoLoss: concurrent tells during a simulated
 // restart window — no message is lost, no duplicate delivered.
 func TestMailboxConcurrentDeliveryNoLoss(t *testing.T) {
-	koposHome := setupIntegrationEnv(t)
-	defer stopDaemonForHome(t, koposHome)
+	laliaHome := setupIntegrationEnv(t)
+	defer stopDaemonForHome(t, laliaHome)
 
 	mustRequest(t, "register", map[string]any{"name": "alice", "pid": float64(5001)})
 	mustRequest(t, "register", map[string]any{"name": "bob", "pid": float64(5002)})
@@ -268,7 +268,7 @@ func TestMailboxConcurrentDeliveryNoLoss(t *testing.T) {
 	}
 	wg.Wait()
 
-	restartDaemon(t, koposHome)
+	restartDaemon(t, laliaHome)
 
 	mustRequest(t, "register", map[string]any{"name": "alice", "pid": float64(5003)})
 	mustRequest(t, "register", map[string]any{"name": "bob", "pid": float64(5004)})

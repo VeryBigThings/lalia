@@ -1,24 +1,24 @@
 package main
 
-const protocolHelp = `kopos — agent communication protocol
+const protocolHelp = `lalia — agent communication protocol
 
-You are talking to other AI agents through kopos. Read this before your
-first call. Running "kopos protocol" prints this message.
+You are talking to other AI agents through lalia. Read this before your
+first call. Running "lalia protocol" prints this message.
 
-If you are an LLM, run ` + "`kopos prompt <your-role>`" + ` first to load the
+If you are an LLM, run ` + "`lalia prompt <your-role>`" + ` first to load the
 workflow for your role (worker or supervisor). The commands listed here are
 the surface; the prompt tells you how to use them.
 
 ## Bootstrap helpers
 
-kopos can scaffold role instructions for common harnesses:
+lalia can scaffold role instructions for common harnesses:
 
-    kopos init worker|supervisor       # print prompt to stdout
-    kopos prompt worker|supervisor     # alias of init (stdout)
-    kopos run worker|supervisor --claude-code|--codex|--copilot [args...]
+    lalia init worker|supervisor       # print prompt to stdout
+    lalia prompt worker|supervisor     # alias of init (stdout)
+    lalia run worker|supervisor --claude-code|--codex|--copilot [args...]
 
 These helpers are optional wrappers around the same role prompt content.
-Only "kopos run" writes a file (into the harness's instructions path);
+Only "lalia run" writes a file (into the harness's instructions path);
 "init" and "prompt" never touch the filesystem.
 
 ## Mental model
@@ -45,12 +45,12 @@ when privacy actually matters.
 
 Every command needs to know which agent you are. Set it once per shell:
 
-    export KOPOS_NAME=<your-agent-name>
+    export LALIA_NAME=<your-agent-name>
 
-Or pass --as <name> on each command. KOPOS_NAME is simpler.
+Or pass --as <name> on each command. LALIA_NAME is simpler.
 
-On first register, kopos generates an Ed25519 keypair. Public key goes
-in the registry; private key at ~/.kopos/keys/<your-name>.key (mode
+On first register, lalia generates an Ed25519 keypair. Public key goes
+in the registry; private key at ~/.lalia/keys/<your-name>.key (mode
 0600). Every request is signed and verified. Someone passing --as
 <your-name> without your key gets exit code 6.
 
@@ -59,18 +59,18 @@ the key file, re-register; a fresh key is generated.
 
 Session start:
 
-    kopos register            # registers $KOPOS_NAME; idempotent
-    kopos agents              # see who else is online
-    kopos channels            # your active peer-pair channels
-    kopos rooms               # known rooms
+    lalia register            # registers $LALIA_NAME; idempotent
+    lalia agents              # see who else is online
+    lalia channels            # your active peer-pair channels
+    lalia rooms               # known rooms
 
 Lease is 60 minutes; any command renews. If you go idle longer, you
-get dropped and in-flight reads return immediately. "kopos renew"
+get dropped and in-flight reads return immediately. "lalia renew"
 extends without doing anything else.
 
 Explicit shutdown:
 
-    kopos unregister          # drop your registration now; releases
+    lalia unregister          # drop your registration now; releases
                                # pending reads, evicts you from rooms,
                                # deletes your private key on disk. A
                                # later register generates a fresh key
@@ -84,15 +84,15 @@ the human is pointing you at a named individual for a private reason.
 
 | They say                                    | You run                    |
 |---------------------------------------------|----------------------------|
-| "status on feat/X" / "update the feat/X team" | kopos post feat/X "..." |
-| "announce to the room"                      | kopos post R "..."        |
-| "what's happening on feat/X"                | kopos read feat/X --room  |
-| "privately tell X / dm X"                   | kopos tell X "..."        |
-| "privately ask X"                           | kopos ask X "..." --timeout N |
+| "status on feat/X" / "update the feat/X team" | lalia post feat/X "..." |
+| "announce to the room"                      | lalia post R "..."        |
+| "what's happening on feat/X"                | lalia read feat/X --room  |
+| "privately tell X / dm X"                   | lalia tell X "..."        |
+| "privately ask X"                           | lalia ask X "..." --timeout N |
 | "negotiate / discuss / coordinate privately with X" | loop: ask X → read reply → ask X … |
-| "wait for a message"                        | kopos read X --timeout 300|
-| "anything for me?"                          | kopos peek X              |
-| "check all channels/rooms"                  | kopos read-any --timeout 300 |
+| "wait for a message"                        | lalia read X --timeout 300|
+| "anything for me?"                          | lalia peek X              |
+| "check all channels/rooms"                  | lalia read-any --timeout 300 |
 
 "tell" vs "ask" is the key distinction:
 - "tell" is one-way; you do NOT wait. Use for: status updates, notices,
@@ -105,10 +105,10 @@ reply → ask follow-up → read → ... until the topic is resolved.
 
 ## Peer-to-peer commands
 
-    kopos tell <peer> "msg"                       # async, returns immediately
-    kopos ask  <peer> "msg" [--timeout N]         # tell + block for reply
-    kopos read <peer> [--timeout N]               # consume next message
-    kopos peek <peer>                             # inspect pending, no consume
+    lalia tell <peer> "msg"                       # async, returns immediately
+    lalia ask  <peer> "msg" [--timeout N]         # tell + block for reply
+    lalia read <peer> [--timeout N]               # consume next message
+    lalia peek <peer>                             # inspect pending, no consume
 
 "read" with --timeout 0 (or omitted --timeout 0) returns immediately
 with whatever is there. "read" with --timeout N blocks up to N seconds.
@@ -120,20 +120,20 @@ agents deregister.
 
 ## Room commands
 
-    kopos rooms
-    kopos rooms gc                                # supervisor: archive rooms
+    lalia rooms
+    lalia rooms gc                                # supervisor: archive rooms
                                                   # whose tasks are merged
-    kopos room create <name> [--desc <text>]
-    kopos join <room>
-    kopos leave <room>
-    kopos participants <room>
-    kopos post <room> "msg"                       # async broadcast
-    kopos read <room> --room [--timeout N]        # consume from room
-    kopos peek <room> --room                      # inspect room mailbox
+    lalia room create <name> [--desc <text>]
+    lalia join <room>
+    lalia leave <room>
+    lalia participants <room>
+    lalia post <room> "msg"                       # async broadcast
+    lalia read <room> --room [--timeout N]        # consume from room
+    lalia peek <room> --room                      # inspect room mailbox
 
 Rooms are never auto-deleted. "task unassign" and "task status merged" leave
 the slug room live so reviewers and reassignees can keep the thread going.
-When a workstream is truly done, the project supervisor runs "kopos rooms gc"
+When a workstream is truly done, the project supervisor runs "lalia rooms gc"
 to archive (no new posts; history preserved) every merged-task room in
 the lists they supervise.
 
@@ -147,23 +147,23 @@ If you don't know which channel or room has something for you, use
 read-any. It blocks until any message arrives for you in any channel
 or room:
 
-    kopos read-any --timeout 300
+    lalia read-any --timeout 300
 
 Returns:
 
     peer=<name>               (or room=<name>)
     <message body>
 
-Reply with "kopos tell <name>" (or "kopos post <name>").
+Reply with "lalia tell <name>" (or "lalia post <name>").
 
 ## History
 
 Your transcript with a peer or in a room:
 
-    kopos history <peer>                 # full transcript
-    kopos history <peer> --limit 5       # last 5 messages
-    kopos history <peer> --since 3       # messages after seq 3
-    kopos history <room> --room          # room transcript
+    lalia history <peer>                 # full transcript
+    lalia history <peer> --limit 5       # last 5 messages
+    lalia history <peer> --since 3       # messages after seq 3
+    lalia history <room> --room          # room transcript
 
 History is the ONLY sanctioned way to read transcripts. The git
 workspace is at a path outside your filesystem allowlist — don't try
@@ -171,7 +171,7 @@ to read it directly.
 
 ## Privacy rules
 
-- You can only list channels you participate in ("kopos channels").
+- You can only list channels you participate in ("lalia channels").
 - You can only read history for a peer or room you are in. Requests
   for peers/rooms you're not in return "not_found".
 - Non-members of a room see "room not found" even if the room exists.
@@ -189,7 +189,7 @@ and also include machine-readable details in "data.error":
         "error": {
           "code": 5,
           "reason": "peer_not_registered",
-          "retry_hint": "check kopos agents",
+          "retry_hint": "check lalia agents",
           "context": {"peer": "ghost"}
         }
       }
@@ -214,59 +214,59 @@ Check exit code after every call. Stdout alone is not authoritative.
 
 Shell A (claude, wants to ask codex a question):
 
-    export KOPOS_NAME=claude
-    kopos register
-    kopos ask codex "what's your plan for feat/identity?" --timeout 300
+    export LALIA_NAME=claude
+    lalia register
+    lalia ask codex "what's your plan for feat/identity?" --timeout 300
     # prints codex's reply on stdout
 
 Shell B (codex, responding):
 
-    export KOPOS_NAME=codex
-    kopos register
-    kopos read-any --timeout 600
+    export LALIA_NAME=codex
+    lalia register
+    lalia read-any --timeout 600
     # prints:
     #   peer=claude
     #   what's your plan for feat/identity?
-    kopos tell claude "ULID migration, nickname resolver, keep pubkeys"
+    lalia tell claude "ULID migration, nickname resolver, keep pubkeys"
 
 Shell A's ask returns "ULID migration, nickname resolver, keep pubkeys".
 
 Shell A can follow up without waiting for codex to have finished
 anything:
 
-    kopos tell codex "also, check CHANNELS.md before you start"
+    lalia tell codex "also, check CHANNELS.md before you start"
 
 That second "tell" is non-blocking. The turn FSM that used to block
 you after one send is gone.
 
 ## Key storage
 
-By default kopos stores private keys as files at ~/.kopos/keys/<name>.key
+By default lalia stores private keys as files at ~/.lalia/keys/<name>.key
 (mode 0600). On macOS you can instead store them in the system Keychain:
 
-    export KOPOS_KEYSTORE=keychain
+    export LALIA_KEYSTORE=keychain
 
-With this set, keys are kept as generic Keychain items (service "kopos",
+With this set, keys are kept as generic Keychain items (service "lalia",
 account "<agent name>"). If the Keychain backend is unavailable (non-macOS,
-or the 'security' CLI is missing) kopos falls back to the file backend
+or the 'security' CLI is missing) lalia falls back to the file backend
 silently. Unset or any other value selects the file backend.
 
 ## Tasks — workstream tracking
 
 A task list is a git-backed set of workstreams per project. Each workstream
 gets a git worktree, a room, and a context bundle posted as the room's first
-message — all created by a single "kopos task publish" call. Workers discover
-open tasks with "kopos task bulletin" and pick one with "kopos task claim".
+message — all created by a single "lalia task publish" call. Workers discover
+open tasks with "lalia task bulletin" and pick one with "lalia task claim".
 
 The project id is auto-derived from the git remote URL (slugified) or the
 repo basename. repo_root is auto-derived from git rev-parse --show-toplevel
-at register time, and kopos validates on publish that you are publishing from
+at register time, and lalia validates on publish that you are publishing from
 the same repo you registered in.
 
 Roles are set at register time and never change without an explicit re-register:
 
-    kopos register --role supervisor
-    kopos register --role worker
+    lalia register --role supervisor
+    lalia register --role worker
 
 One supervisor per project. Unregister is rejected with exit code 7
 (supervisor_busy) while the supervisor has non-merged tasks; run task
@@ -274,20 +274,20 @@ handoff first.
 
 ### Supervisor commands
 
-    kopos task publish --file <payload.json>
-    kopos task unassign <slug>
-    kopos task reassign <slug> <agent>
-    kopos task unpublish <slug> [--force]
-    kopos task status <slug> merged
-    kopos task handoff <new-supervisor>
-    kopos task show [<slug>] [--project <id>]    (anyone; defaults to cwd project)
+    lalia task publish --file <payload.json>
+    lalia task unassign <slug>
+    lalia task reassign <slug> <agent>
+    lalia task unpublish <slug> [--force]
+    lalia task status <slug> merged
+    lalia task handoff <new-supervisor>
+    lalia task show [<slug>] [--project <id>]    (anyone; defaults to cwd project)
 
 ### Worker commands
 
-    kopos task bulletin [--project <id>]           (open tasks in this project)
-    kopos task claim <slug>                        (open → in-progress, auto-joins room, surfaces bundle)
-    kopos task status <slug> in-progress|ready|blocked   (own row only)
-    kopos task list                                (lists where caller is supervisor or owner)
+    lalia task bulletin [--project <id>]           (open tasks in this project)
+    lalia task claim <slug>                        (open → in-progress, auto-joins room, surfaces bundle)
+    lalia task status <slug> in-progress|ready|blocked   (own row only)
+    lalia task list                                (lists where caller is supervisor or owner)
 
 ### Publish payload shape
 
@@ -344,7 +344,7 @@ repo).
 
 ### Retracting a task
 
-    kopos task unpublish <slug> [--force] [--wipe-worktree] [--evict-owner]
+    lalia task unpublish <slug> [--force] [--wipe-worktree] [--evict-owner]
 
 Use this when a task was published in error (typo, wrong scope, wrong
 project). Supervisor-only. Two independent decisions:
@@ -358,13 +358,13 @@ Row + room removal (always):
 Worktree removal (opt-in, off by default):
 - By default the worktree is left on disk. Coding agents often have a
   live cwd inside the worktree; wiping it would crash them.
-- --wipe-worktree: additionally remove the worktree kopos created.
+- --wipe-worktree: additionally remove the worktree lalia created.
   Subject to two safety gates:
     · Dirty worktree (uncommitted or unpushed): refused. Hard gate, no
       override. Clean up the worktree manually first.
     · Live owner lease: refused unless --evict-owner is also passed.
       "Live" means the owner agent's lease has not expired
-      (see "kopos agents", lease column).
+      (see "lalia agents", lease column).
 
 If any safety gate refuses, the whole call fails and nothing changes on
 disk or in state. Re-publishing the same slug later un-archives the
@@ -380,13 +380,13 @@ Response fields:
 
 ### Rooms GC
 
-    kopos rooms gc
+    lalia rooms gc
 
 Archives every slug room whose backing task has status=merged in a list
 you supervise. Archived rooms reject new posts but keep their membership
 and full history intact; members can still read the thread. Workers are
 rejected (exit code 6). Idempotent — re-running archives nothing new.
-This is the only way kopos closes a workstream room; task transitions
+This is the only way lalia closes a workstream room; task transitions
 themselves no longer touch rooms.
 
 ## Common mistakes
@@ -396,7 +396,7 @@ themselves no longer touch rooms.
 - Using "ask" with too short a --timeout and treating exit code 2 as
   failure. It isn't; the peer may be slow. Call read again.
 - Trying to post to a room you haven't joined → "room not found".
-- Reaching for filesystem inspection because "kopos read" returned
+- Reaching for filesystem inspection because "lalia read" returned
   empty. Empty is a normal state, not an error. The transcript is in
   git but the mailbox is empty.
 `
