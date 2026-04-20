@@ -21,7 +21,7 @@ Test suite: ~107 tests across 13 files via `make test`; runs in
 **Active branches (not on main).** None at snapshot time.
 
 **Currently open work.** See the workstream catalog further down.
-The live queue is M / T / W, plus L and S as future items, plus
+The live queue is X / W / M / T, plus L and S as future items, plus
 multi-project workspace isolation which has no design doc yet.
 
 ### Historical note on parallel agent batches
@@ -148,6 +148,42 @@ project shouldn't see.
 
 ## Open workstreams
 
+### X. Task CLI Rename: `task status` → `task set-status`
+
+**Source**: User feedback. `lalia task status <slug> <new>` is
+horrible naming; it's not obvious that it UPDATES state.
+
+**Goal**: Rename the command to clarify that it's a mutation.
+
+**Scope**:
+- **Rename**: Change `lalia task status` to `lalia task set-status`.
+- **Migration**: Keep `status` as a deprecated alias that prints
+  a warning to stderr.
+- **Discovery**: Update `lalia help`, `lalia protocol`, shell
+  completions, and all role prompts (`worker.md`, `supervisor.md`).
+- **Technical**: Internal `cmdTask` dispatch and help strings.
+
+**Status**: Open. Priority: High.
+
+### W. CLI Argument Robustness
+
+**Source**: `lalia-worker-codex` feedback. Current CLI parsing for
+commands like `read`, `post`, and `tell` incorrectly treats flags
+(like `--as`) as positional arguments if they appear early.
+
+**Goal**: Ensure CLI commands correctly distinguish between flags
+and positional arguments regardless of order.
+
+**Scope**:
+- **Refactor**: Update `cmdRead`, `cmdPost`, `cmdTell`, and others
+  to use a flag-aware argument parser.
+- **Fix**: Skip flags when identifying `target`, `room`, or `body`
+  positional arguments.
+- **Consistency**: Ensure all commands handle `--as`, `--timeout`,
+  and `--room` flags robustly.
+
+**Status**: Open. Priority: High.
+
 ### M. Re-register and room membership
 
 **Source**: `lalia-feedback.md` (external). Decide whether
@@ -179,25 +215,6 @@ defaulting to the task that matches the current worktree's branch.
   slug if one exists.
 - **Prompt**: Update `prompts/worker.md` to instruct the agent to
   "confirm and claim the branch-matched task" as its first step.
-
-**Status**: Open.
-
-### W. CLI Argument Robustness
-
-**Source**: `lalia-worker-codex` feedback. Current CLI parsing for
-commands like `read`, `post`, and `tell` incorrectly treats flags
-(like `--as`) as positional arguments if they appear early.
-
-**Goal**: Ensure CLI commands correctly distinguish between flags
-and positional arguments regardless of order.
-
-**Scope**:
-- **Refactor**: Update `cmdRead`, `cmdPost`, `cmdTell`, and others
-  to use a flag-aware argument parser.
-- **Fix**: Skip flags when identifying `target`, `room`, or `body`
-  positional arguments.
-- **Consistency**: Ensure all commands handle `--as`, `--timeout`,
-  and `--room` flags robustly.
 
 **Status**: Open.
 
