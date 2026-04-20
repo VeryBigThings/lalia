@@ -4,7 +4,7 @@ Active and historical workstreams. Rationale, design sketches, and
 the state of shipped vs open work. `BACKLOG.md` is planning and
 history; ARCHITECTURE.md and IDEA.md describe the shipped system.
 
-## Current state (snapshot at commit `588c66c`)
+## Current state (snapshot at commit `2266e2d`)
 
 **Shipped on main.** The channel-based messaging layer, rooms,
 SQLite write queue + mailbox persistence, Ed25519-signed identity,
@@ -142,9 +142,11 @@ project shouldn't see.
   durations, detection of main vs secondary vs outside-repo worktrees.
 - **V. Identity Isolation & Multi-Identity Protection** (`8d43dbc`)
   — PID locking, supervisor claim blocking, and harness session binding.
-- **U. Canonical agent naming** (`66246d7`) — Prevent identity collisions
-  by defaulting to stable, introspected canonical names during registration.
-  Added `lalia suggest-name` and updated role prompts.
+- **U. Canonical agent naming** (`66246d7`, refinements in `2266e2d`) —
+  Prevent identity collisions by defaulting to stable, introspected
+  canonical names during registration. Added `lalia suggest-name`,
+  updated role prompts, and expanded harness detection (Gemini CLI,
+  Codex CI/Thread markers, `codex-cli` rename).
 
 ## Open workstreams
 
