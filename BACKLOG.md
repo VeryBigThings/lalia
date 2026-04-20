@@ -20,7 +20,7 @@ Test suite: ~98 tests across 11 files via `make test`; runs in
 **Active branches (not on main).** None at snapshot time.
 
 **Currently open work.** See the workstream catalog further down.
-The live queue is L / M / N, plus S as a future item, plus
+The live queue is V / U / M / T, plus L and S as future items, plus
 multi-project workspace isolation which has no design doc yet.
 
 ### Historical note on parallel agent batches
@@ -142,197 +142,108 @@ project shouldn't see.
 
 ## Open workstreams
 
-### L. `lalia rename <new>` — identity lifecycle primitive
+### V. Identity Isolation & Multi-Identity Protection
 
-**Source**: `lalia-feedback.md` (external) — obolos-supervisor
-observed that renaming `supervisor` → `obolos-supervisor` required
-three out-of-band steps (register-new + task-handoff +
-unregister-old) and still fragmented channel history across two
-peer-pair keys.
+**Source**: Internal incident during session. `lalia-supervisor` was
+able to register and act as multiple distinct worker identities
+from the same process tree, effectively hijacking the workflow.
 
-**Goal**: Single atomic `lalia rename <new>` that preserves
-`agent_id` + keypair and migrates every name-indexed surface so
-the audit trail stays coherent across a rename.
-
-**Problem**: Agent identity is keyed by name in too many places:
-- `Agent.Name`, `nameIdx[name]` in registry.
-- `Task.Owner`, `TaskList.Supervisor` in task lists.
-- `Room.members[name]` keys.
-- `Channel.PeerA` / `PeerB`, `channelKey(a, b)` for DM history.
-- Private key file `~/.lalia/keys/<name>.key`.
-- Nickname `Address` strings (`name@project:branch`).
-- `anyWaiter[name]`, `channel.waiter[name]` map keys.
-- SQLite mailbox rows keyed by `(owner_name, kind, target, seq)`.
-
-`register --name <new>` today creates a fresh identity with a new
-keypair and ULID; nothing migrates.
+**Goal**: Prevent a single agent or process tree from masquerading
+as multiple registered identities.
 
 **Scope**:
-1. **Registry**: update `nameIdx`, preserve `agent_id` and pubkey,
-   rename key file via `renameKey(old, new)` (new keystore op).
-2. **Tasks**: walk `s.tasks[*]`; rewrite `Supervisor` + `Task.Owner`
-   fields matching the old name; persist.
-3. **Rooms**: walk `s.rooms[*]`; rewrite `members` map keys;
-   persist via `queue.roomRemoveMember` + `queue.roomAddMember`.
-4. **Channels**: walk `s.channels`; rewrite `PeerA`/`PeerB`;
-   re-key the map under the new `channelKey`. Rewrite
-   `mailbox`/`log`/`waiter` map keys.
-5. **SQLite mailbox**: new `queue.mailboxRename(old, new)` that
-   updates both `recipient` and `from_name` columns.
-6. **Nicknames**: rewrite `Address` strings matching `<old>@...`
-   to `<new>@...`.
-7. **Waiters**: migrate `anyWaiter[old]` → `anyWaiter[new]`;
-   in-flight blocking calls stay on their goroutines but their
-   next delivery targets the new key.
-8. **Safety**: refuse on collision with an existing name unless
-   `--force`. Verify caller holds the old name's key.
-9. **Atomicity**: hold `s.mu` for the duration; the SQLite update
-   is the point of no return — do it last, or wrap in a
-   transaction and roll back in-memory on SQLite failure.
+- **PID Locking**: The daemon should enforce a one-registration-per-PID
+  rule (or per-session-tree). Reject `register` if the calling PID
+  is already bound to an active registration.
+- **Role Conflict Prevention**: Block an agent from claiming a task
+  if that agent is the Supervisor of the project's task list.
+- **Registration Tokens**: Supervisors can optionally generate
+  one-time tokens for published tasks; `lalia task claim` requires
+  the token if present.
+- **Context Binding**: Tie registration to harness-specific session
+  IDs (e.g., `CLAUDE_CODE_SESSION`, `CURSOR_SESSION_ID`) to ensure
+  identity cannot be "stolen" by a different harness.
 
-**New op**: `rename` (args: `from`, `to`, optional `force`).
-**New CLI**: `lalia rename <new>`.
-**New error code**: `CodeNameConflict`.
+**Status**: Open. Priority: High.
 
-**Files**: `state.go` (new op + dispatch), `registry.go` (rename
-helpers), `keystore.go` + `keystore_*.go` (key file rename),
-`task.go`, `room.go`, `channel.go`, `nickname.go`, `queue.go`
-(`mailboxRename`), `client.go` (`cmdRename`), `main.go`,
-`help.go`, `protocol.go`, `prompts/*.md`.
+### U. Canonical agent naming
 
-**Tests**: round-trip rename preserves agent_id + keypair; task
-ownership moves; room membership moves; channel DM history
-accessible under the new name; SQLite mailbox rows carry over;
-nickname references rewritten; collision refused without
-`--force`; wrong-key caller rejected; rollback on SQLite failure.
+**Source**: `obolos-supervisor` feedback via DM. Prevent identity
+collisions by defaulting to a stable, introspected canonical name
+during registration.
 
-**Blockers**: Depends on M (re-register semantics) being decided;
-the rename code needs to know whether it's "a live agent changing
-name" or "drop-and-restore" — affects behavior when the caller is
-also currently a member of channels/rooms with pending reads.
+**Goal**: Introspected names that produce distinct results for
+distinct agents by default.
+
+**Scope**:
+- **Introspection**: New helper in `identity.go` that computes a
+  suggested name based on `project`, `harness`, `model`, and a
+  tiebreaker (e.g., short hash of `CWD` or `AgentID`).
+- **Workflow**: `lalia register` without `--name` should default
+  to this canonical name (after confirming with the human).
+- **Prompt**: Update `prompts/worker.md` and `prompts/supervisor.md`
+  to instruct agents to use the introspected default name rather
+  than accepting arbitrary strings from the human.
+- **Surface**: `lalia suggest-name` command to let humans/agents
+  preview the computed name before registration.
+
+**Status**: Open. Priority: High.
 
 ### M. Re-register and room membership
 
-**Source**: `lalia-feedback.md` (external) — a worker followed the
-documented exit protocol (unregister after `ready`), then
-re-registered to look at review, and had to `lalia join <slug>`
-manually because unregister had dropped it from the room.
+**Source**: `lalia-feedback.md` (external). Decide whether
+re-registering under an existing name mean for prior room
+memberships / channel subscriptions.
 
 **Goal**: Pick a consistent answer to "what does re-register under
-an existing name mean for prior room memberships / channel
-subscriptions" and update the worker/supervisor prompts to match.
+an existing name mean" and update the worker/supervisor prompts.
 
-**The two stances**:
-- **Re-register = resume.** Unregister drops the agent but
-  preserves its room memberships on disk under a "paused" marker;
-  re-register rehydrates them. Matches chat-client expectations.
-- **Re-register = fresh identity event.** Unregister is fully
-  terminal; re-register is explicit arrival; rejoining is opt-in.
-  Matches the rest of lalia's explicit-state posture.
-
-**Recommendation**: Fresh-identity. Unregister currently deletes
-the private key on disk; if re-register were resume, that
-deletion would need to go because the same keypair is expected to
-be usable afterwards. Fresh-identity preserves the cleanest story:
-unregister is irrevocable, re-register creates a new agent_id that
-happens to share a name. Any "I want to come back and read" flow
-uses `lalia rename` (workstream L) to change name without losing
-state, not unregister/re-register.
+**Recommendation**: Fresh-identity. Unregister is terminal;
+re-register is explicit arrival; rejoining is opt-in.
 
 **Scope**:
-- Decide the stance.
-- Update `prompts/worker.md` exit-protocol section to spell it out.
-- Update `prompts/supervisor.md` similarly.
-- Update `lalia protocol` / `help.go` identity section if needed.
+- Update `prompts/worker.md` and `prompts/supervisor.md` exit-protocol
+  section to spell it out.
+- Update `lalia protocol` / `help.go` identity section.
 
-**Files**: `prompts/worker.md`, `prompts/supervisor.md`, `help.go`.
-(No daemon code change under the recommended stance.)
-
-**Tests**: Prompt byte-equality across `init`/`prompt` already
-covered; add a test that the updated text mentions the chosen
-stance so future edits don't silently drift.
-
-**Blockers**: None, but blocks L (rename primitive) which wants
-this decided first so its own prompt updates can reference the
-consistent model.
-
-### S. `task spawn` — lalia as agent lifecycle bus (future)
-
-**Goal**: Let a supervisor-class agent spawn one-shot or
-multi-shot sub-agent processes (claude-code, codex, gemini,
-copilot, …) against a specific workstream and read their room
-traffic to guide the next iteration. lalia becomes the
-communication bus **and** the process manager for those
-sub-agents.
-
-**Why**: Today a human has to stand up each worker harness in a
-shell, set `LALIA_NAME`, and direct it to the right slug. For
-fully autonomous orchestration the supervisor needs a primitive
-to say "spin up a worker of runtime R against slug S, seat it,
-let it work, report back when it exits." This is the right home
-for the spawn semantics that the early `plan assign` design
-vaguely gestured at but never implemented cleanly.
-
-**Sketch** (not final):
-- `task spawn <slug> --runtime <claude-code|codex|…> [--one-shot]`:
-  supervisor-only. Registers a transient agent, launches the
-  configured harness in the workstream's worktree with the role
-  prompt wired in, links its stdout/stderr into the room, claims
-  the slug on its behalf, and monitors the process.
-- Multi-shot: the spawned agent can emit structured "iterate" /
-  "done" messages in-room; supervisor re-prompts on iterate,
-  tears down on done.
-- Lifecycle signals piggyback on rooms (supervisor posts a
-  control message; harness interprets). No new transport.
-
-**Non-goals**: replacing human supervisors; auto-merging;
-scheduling across machines. Local-first, per-repo, per-user.
-
-**Status**: Future work. Captured after the publish-pull rewrite
-to make clear that lalia-initiated agent lifecycle is the
-expected home for the assignment-push semantics removed from
-`task publish`.
+**Status**: Open. Blocks L.
 
 ### T. Branch-aware task defaults
 
 **Goal**: Make the worker's arrival experience smoother by
 defaulting to the task that matches the current worktree's branch.
 
-**Context**: When a worker is launched (e.g., via `lalia run worker`), it
-is typically sitting in a secondary worktree created by the
-supervisor for a specific task. That worktree's branch usually
-matches the task's slug (or a related naming convention).
-
 **Scope**:
-- **Discovery**: `lalia task bulletin` should highlight or sort
-  the task matching the caller's current `Branch` to the top.
-- **Workflow**: `lalia task claim` (with no slug provided) should
-  default to the branch-matched slug if one exists, rather than
-  requiring the agent to explicitly parse the bulletin and type
-  the slug.
+- **Discovery**: `lalia task bulletin` highlights the task matching
+  the caller's current `Branch`.
+- **Workflow**: `lalia task claim` defaults to the branch-matched
+  slug if one exists.
 - **Prompt**: Update `prompts/worker.md` to instruct the agent to
   "confirm and claim the branch-matched task" as its first step.
-- **Safety**: Always confirm before claiming. If multiple tasks
-  could match or none match, fall back to the current explicit
-  bulletin flow.
 
 **Status**: Open.
 
+### L. `lalia rename <new>` — identity lifecycle primitive
+
+**Goal**: Single atomic `lalia rename <new>` that preserves
+`agent_id` + keypair and migrates every name-indexed surface so
+the audit trail stays coherent across a rename.
+
+**Status**: Future work. Blocked by M.
+
+### S. `task spawn` — lalia as agent lifecycle bus (future)
+
+**Goal**: Let a supervisor-class agent spawn sub-agent processes
+against a specific workstream and read their room traffic.
+
+**Status**: Future work.
+
 ### Multi-project workspace isolation
 
-**Status**: No design doc yet. Drafted when the feature becomes
-necessary. Current behavior: a single global workspace per user
-at `~/.local/state/lalia/workspace/`, with `LALIA_WORKSPACE`
-override for ad-hoc isolation.
+**Status**: No design doc yet.
 
 ## What is explicitly off-limits
 
-- **Wire format of persisted files** (registry JSON, per-peer
-  `peers/<a>--<b>/*.md`, per-room `rooms/<name>/*.md`,
-  `tasks/<project-id>/task-list.json`) — changes require a
-  migration plan.
-- **Deleting or renaming existing commands** — additive only
-  unless the change has a migration note in `help.go` and
-  `lalia protocol`.
+- **Wire format of persisted files** — changes require a migration plan.
+- **Deleting or renaming existing commands** — additive only.
 - **Touching `/opt/homebrew/bin/lalia`** from a feature branch.
-  The production binary is rebuilt from main only.
