@@ -218,6 +218,8 @@ func detectHarness() string {
 		return "aider"
 	case os.Getenv("GITHUB_COPILOT_CLI") != "" || os.Getenv("COPILOT_AGENT") != "":
 		return "copilot"
+	case os.Getenv("GEMINI_CLI") != "" || os.Getenv("GEMINI_AGENT") != "":
+		return "gemini-cli"
 	default:
 		return "unknown"
 	}
