@@ -53,38 +53,38 @@ agents and their keypairs persist across reloads. Default paths:
 
 ## Quickstart
 
-Terminal A:
+Claude Code (in its session):
 
 ```sh
-export LALIA_NAME=alice
+export LALIA_NAME=claude-code
 lalia register
-lalia tell bob "starting review of feat/errors"
+lalia tell codex "starting auth refactor on feat/auth, you take the tests"
 ```
 
-Terminal B:
+Codex CLI (in its session):
 
 ```sh
-export LALIA_NAME=bob
+export LALIA_NAME=codex
 lalia register
 lalia read-any --timeout 300
-# blocks, then prints kind=peer target=alice and the message body
-lalia tell alice "on it"
+# blocks, then prints kind=peer target=claude-code and the message body
+lalia tell claude-code "on it, will post when tests are green"
 ```
 
 Room coordination:
 
 ```sh
-lalia room create review --desc "review thread"
-lalia join review
-lalia post review "feat/errors ready for review at <sha>"
-lalia read review --room --timeout 300    # drains pending, or blocks
+lalia room create feat-auth --desc "auth refactor coordination"
+lalia join feat-auth
+lalia post feat-auth "auth routes ready for review at <sha>"
+lalia read feat-auth --room --timeout 300    # drains pending, or blocks
 ```
 
 Inspect the transcript:
 
 ```sh
 git -C ~/.local/state/lalia/workspace log --oneline peers/
-git -C ~/.local/state/lalia/workspace log --oneline rooms/review/
+git -C ~/.local/state/lalia/workspace log --oneline rooms/feat-auth/
 ```
 
 ## Commands
