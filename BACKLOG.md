@@ -4,23 +4,24 @@ Active and historical workstreams. Rationale, design sketches, and
 the state of shipped vs open work. `BACKLOG.md` is planning and
 history; ARCHITECTURE.md and IDEA.md describe the shipped system.
 
-## Current state (snapshot at commit `8d43dbc`)
+## Current state (snapshot at commit `66246d7`)
 
 **Shipped on main.** The channel-based messaging layer, rooms,
 SQLite write queue + mailbox persistence, Ed25519-signed identity,
 60-minute leases, harness bootstrap (`init`/`prompt`/`run`),
 decentralized peer role, supervisor/worker task primitive,
 keychain integration, structured error payloads, room transcript
-rehydration on boot, repository-grouped agent discovery (N), and
-identity isolation safeguards (V) are all shipped.
+rehydration on boot, repository-grouped agent discovery (N),
+identity isolation safeguards (V), and canonical introspected
+agent naming (U) are all shipped.
 
-Test suite: ~98 tests across 11 files via `make test`; runs in
-~17–18s.
+Test suite: ~107 tests across 13 files via `make test`; runs in
+~19–20s.
 
 **Active branches (not on main).** None at snapshot time.
 
 **Currently open work.** See the workstream catalog further down.
-The live queue is V / U / M / T, plus L and S as future items, plus
+The live queue is M / T, plus L and S as future items, plus
 multi-project workspace isolation which has no design doc yet.
 
 ### Historical note on parallel agent batches
@@ -141,31 +142,11 @@ project shouldn't see.
   durations, detection of main vs secondary vs outside-repo worktrees.
 - **V. Identity Isolation & Multi-Identity Protection** (`8d43dbc`)
   — PID locking, supervisor claim blocking, and harness session binding.
+- **U. Canonical agent naming** (`66246d7`) — Prevent identity collisions
+  by defaulting to stable, introspected canonical names during registration.
+  Added `lalia suggest-name` and updated role prompts.
 
 ## Open workstreams
-
-### U. Canonical agent naming
-
-**Source**: `obolos-supervisor` feedback via DM. Prevent identity
-collisions by defaulting to a stable, introspected canonical name
-during registration.
-
-**Goal**: Introspected names that produce distinct results for
-distinct agents by default.
-
-**Scope**:
-- **Introspection**: New helper in `identity.go` that computes a
-  suggested name based on `project`, `harness`, `model`, and a
-  tiebreaker (e.g., short hash of `CWD` or `AgentID`).
-- **Workflow**: `lalia register` without `--name` should default
-  to this canonical name (after confirming with the human).
-- **Prompt**: Update `prompts/worker.md` and `prompts/supervisor.md`
-  to instruct agents to use the introspected default name rather
-  than accepting arbitrary strings from the human.
-- **Surface**: `lalia suggest-name` command to let humans/agents
-  preview the computed name before registration.
-
-**Status**: Open. Priority: High.
 
 ### M. Re-register and room membership
 

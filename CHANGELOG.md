@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.0] - 2026-04-20
+
+### Added
+- **Canonical Agent Naming**: Prevent identity collisions by defaulting to stable, introspected canonical names during registration.
+- New command: `lalia suggest-name` to preview the introspected identity.
+- Introspected names produce distinct results based on harness, role, and worktree/branch context.
+
+### Changed
+- `lalia register` now defaults to the suggested canonical name if `--name` and `LALIA_NAME` are unset.
+- Updated `prompts/worker.md` and `prompts/supervisor.md` to use canonical naming and introspection.
+
 ## [1.2.0] - 2026-04-20
 
 ### Added
