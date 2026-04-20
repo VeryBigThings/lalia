@@ -75,6 +75,13 @@ _lalia() {
                         '1:role:(peer worker supervisor)' \
                         '*:harness flag:(--claude-code --codex --copilot --force)'
                     ;;
+                agents)
+                    _arguments \
+                        '--grouped[grouped view by repository (default)]' \
+                        '--flat[flat table view]' \
+                        '--wide[include more details (id, started, cwd)]' \
+                        '--json[raw JSON output]'
+                    ;;
                 register)
                     _arguments \
                         '--name[caller name]:name:' \

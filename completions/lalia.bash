@@ -30,6 +30,9 @@ _lalia() {
                 COMPREPLY=( $(compgen -W "--claude-code --codex --copilot --force" -- "$cur") )
             fi
             ;;
+        agents)
+            COMPREPLY=( $(compgen -W "--grouped --flat --wide --json" -- "$cur") )
+            ;;
         rooms)
             if [[ $COMP_CWORD -eq 2 ]]; then
                 COMPREPLY=( $(compgen -W "gc" -- "$cur") )

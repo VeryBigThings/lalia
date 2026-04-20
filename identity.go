@@ -26,14 +26,16 @@ func isULID(s string) bool {
 
 // AgentInfo holds auto-detected fields for a new registration.
 type AgentInfo struct {
-	Harness  string
-	Model    string
-	Project  string
-	RepoURL  string
-	RepoRoot string // absolute path of the main worktree, used by task publish
-	Worktree string
-	Branch   string
-	CWD      string
+	Harness        string
+	Model          string
+	Project        string
+	RepoURL        string
+	RepoRoot       string // absolute path of the current worktree
+	MainRepoRoot   string // absolute path of the main worktree
+	WorktreeKind   string // main | secondary | detached | outside
+	Worktree       string
+	Branch         string
+	CWD            string
 }
 
 // DetectAgentInfo auto-detects registration metadata from the caller's environment.
@@ -43,7 +45,9 @@ func DetectAgentInfo(overrides AgentInfo) AgentInfo {
 
 	info.CWD = overrides.CWD
 	if info.CWD == "" {
-		info.CWD, _ = os.Getwd()
+		if cwd, err := os.Getwd(); err == nil {
+			info.CWD = canonicalPath(cwd)
+		}
 	}
 
 	info.Worktree = filepath.Base(info.CWD)
@@ -61,12 +65,32 @@ func DetectAgentInfo(overrides AgentInfo) AgentInfo {
 	info.RepoRoot = overrides.RepoRoot
 	if info.RepoRoot == "" {
 		if root := gitOutput("rev-parse", "--show-toplevel"); root != "" {
-			if abs, err := filepath.Abs(root); err == nil {
-				info.RepoRoot = abs
+			info.RepoRoot = canonicalPath(root)
+		}
+	}
+
+	// WorktreeKind and MainRepoRoot detection
+	if info.RepoRoot != "" {
+		commonDir := gitOutput("rev-parse", "--git-common-dir")
+		if commonDir != "" {
+			// --git-common-dir is relative to CWD if not absolute.
+			if !filepath.IsAbs(commonDir) {
+				commonDir = filepath.Join(info.CWD, commonDir)
+			}
+			info.MainRepoRoot = canonicalPath(filepath.Dir(commonDir))
+
+			if info.RepoRoot == info.MainRepoRoot {
+				info.WorktreeKind = "main"
 			} else {
-				info.RepoRoot = root
+				info.WorktreeKind = "secondary"
 			}
 		}
+		// Check for detached HEAD
+		if info.Branch == "HEAD" {
+			info.WorktreeKind = "detached"
+		}
+	} else {
+		info.WorktreeKind = "outside"
 	}
 
 	info.Project = overrides.Project
@@ -82,13 +106,13 @@ func DetectAgentInfo(overrides AgentInfo) AgentInfo {
 		}
 		if info.Project == "" {
 			// basename of master repo dir (works for worktrees without remote)
-			gdCommon := gitOutput("rev-parse", "--git-common-dir")
-			if gdCommon != "" {
-				// --git-common-dir returns the .git dir of the main worktree
-				info.Project = filepath.Base(filepath.Dir(gdCommon))
+			if info.MainRepoRoot != "" {
+				info.Project = filepath.Base(info.MainRepoRoot)
 			}
 		}
-		if info.Project == "" {
+		// If still empty and not in a repo, don't fallback to CWD basename
+		// unless explicitly overridden or in a repo.
+		if info.Project == "" && info.WorktreeKind != "outside" {
 			info.Project = filepath.Base(info.CWD)
 		}
 	}
@@ -101,6 +125,19 @@ func DetectAgentInfo(overrides AgentInfo) AgentInfo {
 	info.Model = overrides.Model
 
 	return info
+}
+
+// canonicalPath returns the absolute, symlink-evaluated form of a path.
+func canonicalPath(path string) string {
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return path
+	}
+	eval, err := filepath.EvalSymlinks(abs)
+	if err != nil {
+		return abs
+	}
+	return eval
 }
 
 // detectHarness probes well-known env vars set by agent harnesses.

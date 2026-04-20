@@ -1,8 +1,10 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 )
 
 // leschDir returns the per-user lalia runtime directory. Holds the
@@ -18,6 +20,30 @@ func leschDir() string {
 
 func socketPath() string { return filepath.Join(leschDir(), "sock") }
 func pidPath() string    { return filepath.Join(leschDir(), "pid") }
+
+// humanizeDuration returns a relative duration string like "just now",
+// "42s ago", "3m ago", "1h ago". For ages > 24h, falls back to the date.
+func humanizeDuration(t time.Time) string {
+	if t.IsZero() {
+		return "never"
+	}
+	d := time.Since(t)
+	switch {
+	case d < 0:
+		return "in future"
+	case d < 5*time.Second:
+		return "just now"
+	case d < time.Minute:
+		return fmt.Sprintf("%ds ago", int(d.Seconds()))
+	case d < time.Hour:
+		return fmt.Sprintf("%dm ago", int(d.Minutes()))
+	case d < 24*time.Hour:
+		return fmt.Sprintf("%dh ago", int(d.Hours()))
+	default:
+		return t.Format("2006-01-02")
+	}
+}
+
 
 // workspacePath returns the path to the git repo that stores transcripts.
 // Default lives at ~/.local/state/lalia/workspace — deliberately outside

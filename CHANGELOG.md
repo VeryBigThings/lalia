@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.0] - 2026-04-20
+
+### Added
+- Grouped view by repository in `lalia agents` (now the default).
+- Git topology detection: agents now track if they are in a `main` worktree, `secondary` worktree, or `outside` any repository.
+- `main_repo_root` and `worktree_kind` fields added to agent metadata.
+- New flags for `lalia agents`: `--grouped` (default), `--flat`, and `--wide`.
+- Relative last-seen durations in `lalia agents` (e.g., "just now", "5m ago").
+
+### Changed
+- `lalia agents` output is now more human-readable and clustered by repo.
+- Updated `Agent` and `AgentInfo` structs to carry rich git metadata.
+
 ## [1.0.0] - 2026-04-20
 
 ### Added

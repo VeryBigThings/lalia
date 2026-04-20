@@ -544,19 +544,6 @@ func branchExists(repoRoot, branch string) bool {
 	return err == nil
 }
 
-// canonicalPath normalizes a path via EvalSymlinks when the target exists,
-// falling back to Abs otherwise. This is needed on macOS where /var is a
-// symlink to /private/var: filepath.Abs on a test tempdir yields /var/...
-// while `git worktree list` reports /private/var/..., and a naive string
-// compare misses the match on republish-against-existing-worktree.
-func canonicalPath(p string) string {
-	if real, err := filepath.EvalSymlinks(p); err == nil {
-		return real
-	}
-	abs, _ := filepath.Abs(p)
-	return abs
-}
-
 // ensureWorktree makes sure a worktree exists at target on branch, creating
 // it if needed. Returns (didCreate, error). Idempotent: if the target already
 // hosts that branch, returns (false, nil).

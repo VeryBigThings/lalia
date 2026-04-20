@@ -135,6 +135,9 @@ project shouldn't see.
 - **Peer role** — decentralized coordination prompt (`prompts/peer.md`)
   for agents not in a supervisor/worker workflow. Updated `init` /
   `prompt` / `run` to support the `peer` role.
+- **N. `lalia agents` — decomposed columns + worktree-kind tracking**
+  (`933a0ce` and subsequent) — repository grouping, relative last-seen
+  durations, detection of main vs secondary vs outside-repo worktrees.
 
 ## Open workstreams
 
@@ -251,109 +254,6 @@ stance so future edits don't silently drift.
 **Blockers**: None, but blocks L (rename primitive) which wants
 this decided first so its own prompt updates can reference the
 consistent model.
-
-### N. `lalia agents` — decomposed columns + worktree-kind tracking
-
-**Source**: user feedback. Two parts of the same theme:
-- The `qualified` column (`name@project:branch`) is a single
-  squashed string that humans can't scan. The metadata is already
-  on `Agent`; it's not surfaced as independent columns.
-- Topology: for each agent we want to know whether its cwd is the
-  main worktree of a repo, a secondary worktree (branch worktree),
-  or outside any repo. Today nothing distinguishes these.
-
-**Goal**: Capture the missing "what kind of worktree is this
-agent in" metadata, and rework `lalia agents` so project / branch
-/ worktree / worktree-kind / lease / role are separate columns.
-Keep `qualified` in the response for scripting.
-
-**Scope**:
-
-Metadata capture (`identity.go` + `state.go`):
-- `AgentInfo.MainRepoRoot` — absolute, symlink-normalized path of
-  the main worktree for the current repo. Derived from
-  `git rev-parse --git-common-dir` → parent dir → `canonicalPath`.
-  Stable across all worktrees of the same repo, unlike `RepoRoot`
-  which points at the current (possibly secondary) worktree.
-- `AgentInfo.WorktreeKind` ∈ `{"main", "secondary", "detached",
-  "outside"}`:
-    - `outside`: `git rev-parse` fails (not inside a git repo).
-    - `main`: `show-toplevel` == parent of `--git-common-dir`.
-    - `secondary`: `show-toplevel` != parent of
-      `--git-common-dir` (cwd is inside `.git/worktrees/<name>/`).
-    - `detached`: HEAD is detached (no branch ref).
-- Propagate both onto `Agent` and persist (registry write).
-- Include both plus existing `project` / `branch` / `worktree` /
-  `role` in the `opAgents` response.
-
-**Handling "outside any repo" agents**:
-1. *Outside, no --project override*: git-derived fields empty;
-   `WorktreeKind = "outside"`. Drop the current `basename(CWD)`
-   fallback for `Project` in `identity.go` — it creates
-   meaningless collisions between unrelated agents in different
-   dirs. Let `Project` stay empty when no git context exists.
-2. *Outside, --project X explicit*: user forces association.
-   `Project = X`, `WorktreeKind = "outside"`, git fields empty.
-   Agent can participate in rooms and peer messaging for that
-   project but cannot claim/publish tasks.
-3. *Inside a repo with no remote*: existing fallback behavior
-   (Project = repo basename); `WorktreeKind` set normally.
-
-Display surface (`client.go`):
-
-Default `lalia agents` output becomes a **grouped view by repo**
-— the primary question the command answers is "which agents are
-clustered together?" and the grouped layout shows that
-structurally instead of making the user mentally sort by project.
-The `main:` / `worktree:` line labels replace a `wt-kind` column.
-
-Example:
-
-        repo: /Users/neektza/Code/obolos (obolos)
-          main:       supervisor        master         live     claude-code  3s ago
-          worktree:   codex             feat/bb-core   live     codex        42s ago  (wt/bb-core)
-        repo: /Users/neektza/Code/lalia (lalia)
-          main:       lalia-maintainer  main           live     claude-code  just now
-        outside:
-          orphan-tool     (cwd: /tmp/scratch)           live     claude-code  1m ago
-          analysis        (--project=obolos, no wt)    live     codex        5m ago
-
-Key surface changes:
-- Default view shows **last activity** (from `Agent.LastSeenAt`,
-  renewed by `renewLease` on every authenticated request) instead
-  of `started_at`. "When did this agent last talk to lalia?" is
-  more actionable than "when did it first register."
-- `last_seen` rendered as a relative duration (`just now`,
-  `42s ago`, `3m ago`, `1h ago`). For ages > 24h, fall back to
-  the date.
-- Repos sorted by agent count desc; within a repo, main first
-  then secondary worktrees alphabetical.
-- `agent_id` not shown in default view; keep behind `--wide`.
-
-Flags:
-- `--grouped` — explicit request for grouped view. **Default.**
-- `--flat` — flat table (one row per agent, explicit `project` +
-  `wt-kind` columns) for scripts. Mutually exclusive with
-  `--grouped`.
-- `--wide` — in either layout, include `agent_id`, `cwd`,
-  `expires_at`, `main_repo_root`, `started_at`.
-- `--json` — pass-through of the raw response. Retains both
-  `started_at` and `last_seen_at` as full RFC3339 timestamps.
-  Ignores `--grouped`/`--flat` (display-only concerns).
-
-**Files**: `identity.go` (new detection helpers), `state.go`
-(AgentInfo → Agent propagation, opAgents response fields),
-`client.go` (cmdAgents formatter, flags).
-
-**Tests**:
-- `TestDetectWorktreeKindMain` / `...Secondary` / `...Outside` /
-  `...Detached` — seed a git repo + secondary worktree in a
-  tempdir; assert detection from each cwd.
-- `TestAgentsResponseHasTopologyFields` — register agents from
-  each kind of cwd; assert fields populate.
-- Keep existing `TestAgentsIncludesLeaseStatus` shape.
-
-**Blockers**: None. Only additive fields on `opAgents`.
 
 ### S. `task spawn` — lalia as agent lifecycle bus (future)
 

@@ -7,22 +7,24 @@ import (
 )
 
 type Agent struct {
-	AgentID    string    `json:"agent_id"`           // ULID, stable for the life of the keypair
-	Name       string    `json:"name"`               // display name, not unique
-	Pubkey     string    `json:"pubkey"`             // hex-encoded Ed25519 public key
-	Role       string    `json:"role,omitempty"`     // "supervisor" | "worker" | ""
-	Harness    string    `json:"harness,omitempty"`  // claude-code | codex | cursor | …
-	Model      string    `json:"model,omitempty"`    // e.g. claude-opus-4-7
-	Project    string    `json:"project,omitempty"`   // resolved from git remote or cwd
-	RepoURL    string    `json:"repo_url,omitempty"`  // full remote URL when available
-	RepoRoot   string    `json:"repo_root,omitempty"` // absolute path of main worktree, used by task publish
-	Worktree   string    `json:"worktree,omitempty"`  // basename of cwd
-	Branch     string    `json:"branch,omitempty"`   // git rev-parse --abbrev-ref HEAD
-	CWD        string    `json:"cwd,omitempty"`      // full path the agent is running from
-	PID        int       `json:"pid"`
-	StartedAt  time.Time `json:"started_at"`
-	LastSeenAt time.Time `json:"last_seen_at"`
-	ExpiresAt  time.Time `json:"expires_at"`
+	AgentID      string    `json:"agent_id"`           // ULID, stable for the life of the keypair
+	Name         string    `json:"name"`               // display name, not unique
+	Pubkey       string    `json:"pubkey"`             // hex-encoded Ed25519 public key
+	Role         string    `json:"role,omitempty"`     // "supervisor" | "worker" | "" | "peer"
+	Harness      string    `json:"harness,omitempty"`  // claude-code | codex | cursor | …
+	Model        string    `json:"model,omitempty"`    // e.g. claude-opus-4-7
+	Project      string    `json:"project,omitempty"`   // resolved from git remote or cwd
+	RepoURL      string    `json:"repo_url,omitempty"`  // full remote URL when available
+	RepoRoot     string    `json:"repo_root,omitempty"` // absolute path of current worktree
+	MainRepoRoot string    `json:"main_repo_root,omitempty"` // absolute path of main worktree
+	WorktreeKind string    `json:"worktree_kind,omitempty"` // main | secondary | detached | outside
+	Worktree     string    `json:"worktree,omitempty"`  // basename of cwd
+	Branch       string    `json:"branch,omitempty"`   // git rev-parse --abbrev-ref HEAD
+	CWD          string    `json:"cwd,omitempty"`      // full path the agent is running from
+	PID          int       `json:"pid"`
+	StartedAt    time.Time `json:"started_at"`
+	LastSeenAt   time.Time `json:"last_seen_at"`
+	ExpiresAt    time.Time `json:"expires_at"`
 }
 
 // Lease duration. Any command from the agent renews; sweeper drops expired.
@@ -400,14 +402,16 @@ func (s *State) opRegister(req Request) Response {
 
 	// Collect optional metadata sent by the client
 	info := AgentInfo{
-		Harness:  strVal(req.Args, "harness"),
-		Model:    strVal(req.Args, "model"),
-		Project:  strVal(req.Args, "project"),
-		RepoURL:  strVal(req.Args, "repo_url"),
-		RepoRoot: strVal(req.Args, "repo_root"),
-		Worktree: strVal(req.Args, "worktree"),
-		Branch:   strVal(req.Args, "branch"),
-		CWD:      strVal(req.Args, "cwd"),
+		Harness:      strVal(req.Args, "harness"),
+		Model:        strVal(req.Args, "model"),
+		Project:      strVal(req.Args, "project"),
+		RepoURL:      strVal(req.Args, "repo_url"),
+		RepoRoot:     strVal(req.Args, "repo_root"),
+		MainRepoRoot: strVal(req.Args, "main_repo_root"),
+		WorktreeKind: strVal(req.Args, "worktree_kind"),
+		Worktree:     strVal(req.Args, "worktree"),
+		Branch:       strVal(req.Args, "branch"),
+		CWD:          strVal(req.Args, "cwd"),
 	}
 
 	now := time.Now()
@@ -440,6 +444,12 @@ func (s *State) opRegister(req Request) Response {
 	}
 	if info.RepoRoot != "" {
 		a.RepoRoot = info.RepoRoot
+	}
+	if info.MainRepoRoot != "" {
+		a.MainRepoRoot = info.MainRepoRoot
+	}
+	if info.WorktreeKind != "" {
+		a.WorktreeKind = info.WorktreeKind
 	}
 	if info.Worktree != "" {
 		a.Worktree = info.Worktree
@@ -832,16 +842,26 @@ func (s *State) opAgents() Response {
 			leaseStatus = "live"
 		}
 		data = append(data, map[string]any{
-			"agent_id":     a.AgentID,
-			"name":         a.Name,
-			"qualified":    qualifiedName(a),
-			"harness":      a.Harness,
-			"pid":          a.PID,
-			"started_at":   a.StartedAt.Format(time.RFC3339),
-			"last_seen_at": a.LastSeenAt.Format(time.RFC3339),
-			"expires_at":   a.ExpiresAt.Format(time.RFC3339),
-			"lease_status": leaseStatus,
-			"live":         live,
+			"agent_id":       a.AgentID,
+			"name":           a.Name,
+			"qualified":      qualifiedName(a),
+			"role":           a.Role,
+			"harness":        a.Harness,
+			"model":          a.Model,
+			"project":        a.Project,
+			"repo_url":       a.RepoURL,
+			"repo_root":      a.RepoRoot,
+			"main_repo_root": a.MainRepoRoot,
+			"worktree_kind":  a.WorktreeKind,
+			"worktree":       a.Worktree,
+			"branch":         a.Branch,
+			"cwd":            a.CWD,
+			"pid":            a.PID,
+			"started_at":     a.StartedAt.Format(time.RFC3339),
+			"last_seen_at":   a.LastSeenAt.Format(time.RFC3339),
+			"expires_at":     a.ExpiresAt.Format(time.RFC3339),
+			"lease_status":   leaseStatus,
+			"live":           live,
 		})
 	}
 	return Response{OK: true, Data: data}

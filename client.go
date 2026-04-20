@@ -9,6 +9,7 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"sort"
 	"strconv"
 	"strings"
 	"syscall"
@@ -148,6 +149,12 @@ func cmdRegister(args []string) {
 	if info.RepoRoot != "" {
 		reqArgs["repo_root"] = info.RepoRoot
 	}
+	if info.MainRepoRoot != "" {
+		reqArgs["main_repo_root"] = info.MainRepoRoot
+	}
+	if info.WorktreeKind != "" {
+		reqArgs["worktree_kind"] = info.WorktreeKind
+	}
 	if info.Worktree != "" {
 		reqArgs["worktree"] = info.Worktree
 	}
@@ -179,24 +186,139 @@ func cmdUnregister(args []string) {
 	})
 }
 
-func cmdAgents(_ []string) {
+func cmdAgents(args []string) {
 	resp, err := request("agents", nil)
 	handle(resp, err, func(data any) {
 		rows, ok := data.([]any)
 		if !ok {
 			return
 		}
-		// Print header
-		fmt.Printf("%-26s  %-16s  %-28s  %-12s  %-7s  %s\n",
-			"agent_id", "name", "qualified", "harness", "lease", "started_at")
+
+		if parseBoolFlag(args, "--json") {
+			raw, _ := json.MarshalIndent(rows, "", "  ")
+			fmt.Println(string(raw))
+			return
+		}
+
+		flat := parseBoolFlag(args, "--flat")
+		wide := parseBoolFlag(args, "--wide")
+
+		if flat {
+			// Print header
+			if wide {
+				fmt.Printf("%-26s  %-16s  %-28s  %-12s  %-12s  %-10s  %-12s  %-12s  %-7s  %s\n",
+					"agent_id", "name", "project", "harness", "branch", "role", "started", "last_seen", "lease", "cwd")
+			} else {
+				fmt.Printf("%-16s  %-20s  %-12s  %-12s  %-12s  %-12s  %s\n",
+					"name", "project", "harness", "branch", "role", "last_seen", "lease")
+			}
+			for _, row := range rows {
+				m := row.(map[string]any)
+				lastSeenTs, _ := time.Parse(time.RFC3339, m["last_seen_at"].(string))
+				startedTs, _ := time.Parse(time.RFC3339, m["started_at"].(string))
+				lease, _ := m["lease_status"].(string)
+
+				if wide {
+					fmt.Printf("%-26s  %-16s  %-28s  %-12s  %-12s  %-10s  %-12s  %-12s  %-7s  %s\n",
+						m["agent_id"], m["name"], m["project"], m["harness"], m["branch"], m["role"],
+						startedTs.Format("2006-01-02"), humanizeDuration(lastSeenTs), lease, m["cwd"])
+				} else {
+					fmt.Printf("%-16s  %-20s  %-12s  %-12s  %-12s  %-12s  %s\n",
+						m["name"], m["project"], m["harness"], m["branch"], m["role"],
+						humanizeDuration(lastSeenTs), lease)
+				}
+			}
+			return
+		}
+
+		// Grouped view (default)
+		type RepoGroup struct {
+			Path   string
+			Name   string
+			Agents []map[string]any
+		}
+		groups := make(map[string]*RepoGroup)
+		var outside []map[string]any
+
 		for _, row := range rows {
 			m := row.(map[string]any)
-			lease, _ := m["lease_status"].(string)
-			if lease == "" {
-				lease = "?"
+			mainRoot, _ := m["main_repo_root"].(string)
+			if mainRoot == "" {
+				outside = append(outside, m)
+				continue
 			}
-			fmt.Printf("%-26s  %-16s  %-28s  %-12s  %-7s  %v\n",
-				m["agent_id"], m["name"], m["qualified"], m["harness"], lease, m["started_at"])
+			g, ok := groups[mainRoot]
+			if !ok {
+				g = &RepoGroup{Path: mainRoot, Name: m["project"].(string)}
+				groups[mainRoot] = g
+			}
+			g.Agents = append(g.Agents, m)
+		}
+
+		// Sort groups by agent count desc
+		sortedGroups := make([]*RepoGroup, 0, len(groups))
+		for _, g := range groups {
+			sortedGroups = append(sortedGroups, g)
+		}
+		sort.Slice(sortedGroups, func(i, j int) bool {
+			return len(sortedGroups[i].Agents) > len(sortedGroups[j].Agents)
+		})
+
+		for _, g := range sortedGroups {
+			fmt.Printf("repo: %s (%s)\n", g.Path, g.Name)
+			// Sort agents: main first, then secondary alphabetical by worktree
+			sort.Slice(g.Agents, func(i, j int) bool {
+				ki, _ := g.Agents[i]["worktree_kind"].(string)
+				kj, _ := g.Agents[j]["worktree_kind"].(string)
+				if ki == "main" && kj != "main" {
+					return true
+				}
+				if ki != "main" && kj == "main" {
+					return false
+				}
+				wi, _ := g.Agents[i]["worktree"].(string)
+				wj, _ := g.Agents[j]["worktree"].(string)
+				return wi < wj
+			})
+
+			for _, m := range g.Agents {
+				kind, _ := m["worktree_kind"].(string)
+				prefix := "  worktree: "
+				if kind == "main" {
+					prefix = "  main:     "
+				}
+				lastSeenTs, _ := time.Parse(time.RFC3339, m["last_seen_at"].(string))
+				lease, _ := m["lease_status"].(string)
+
+				detail := ""
+				if kind == "secondary" {
+					detail = fmt.Sprintf(" (%s)", m["worktree"])
+				}
+
+				fmt.Printf("%s%-16s  %-14s  %-7s  %-12s  %-10s%s\n",
+					prefix, m["name"], m["branch"], lease, m["harness"], humanizeDuration(lastSeenTs), detail)
+
+				if wide {
+					fmt.Printf("            id:%s  cwd:%s\n", m["agent_id"], m["cwd"])
+				}
+			}
+		}
+
+		if len(outside) > 0 {
+			fmt.Println("outside:")
+			for _, m := range outside {
+				lastSeenTs, _ := time.Parse(time.RFC3339, m["last_seen_at"].(string))
+				lease, _ := m["lease_status"].(string)
+				project, _ := m["project"].(string)
+				if project != "" {
+					project = " (--project=" + project + ")"
+				}
+				fmt.Printf("  %-16s  (cwd: %-20s%s)  %-7s  %-12s  %s\n",
+					m["name"], m["cwd"], project, lease, m["harness"], humanizeDuration(lastSeenTs))
+				if wide {
+					fmt.Printf("            id:%s\n", m["agent_id"])
+				}
+			}
 		}
 	})
 }
