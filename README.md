@@ -118,8 +118,9 @@ git -C ~/.local/state/lalia/workspace log --oneline rooms/review/
 
 | Command | Description |
 |---|---|
-| `lalia register [--name N] [--role supervisor\|worker] [--project P]` | Register caller. Generates Ed25519 keypair on first call; reuses it on re-register. Captures project/branch/worktree from cwd. |
-| `lalia unregister` | Leaves rooms, releases pending reads, deletes the private key. Re-register generates a fresh key. |
+| `lalia register [--name N] [--role supervisor\|worker] [--project P]` | Register caller. Defaults to canonical introspected name if `--name` and `LALIA_NAME` are unset. Generates Ed25519 keypair; captures project/branch/worktree from cwd. |
+| `lalia suggest-name [--role R]` | Preview the canonical name lalia would assign on register. |
+| `lalia unregister` | Terminal and irrevocable: leaves rooms, releases pending reads, deletes the private key. Re-registering under the same name creates a **fresh identity** (new `agent_id`, new keypair, no prior room memberships). |
 | `lalia agents` | List registered agents with lease status. |
 | `lalia renew` | Extend caller's lease (any command also renews; leases are 60 min). |
 | `lalia nickname [<nick> [<address>]]` | Assign, list, or delete personal nicknames. `--follow` tracks rebinding across re-register. |
@@ -131,7 +132,7 @@ git -C ~/.local/state/lalia/workspace log --oneline rooms/review/
 | `lalia task publish --file <payload.json>` | Supervisor: atomically create N worktrees + rooms + bundle posts. |
 | `lalia task bulletin [--project <id>]` | List open tasks available to claim. |
 | `lalia task claim <slug>` | Worker: atomic flip to in-progress, auto-join the slug's room. |
-| `lalia task status <slug> <in-progress\|ready\|blocked\|merged>` | Mutate caller's own row. |
+| `lalia task set-status <slug> <in-progress\|ready\|blocked\|merged>` | Mutate caller's own row (owner) or flip to merged (supervisor). |
 | `lalia task show [<slug>]` / `task list` | Inspect tasks. |
 | `lalia task unassign / reassign / unpublish / handoff` | Supervisor mutations. |
 
@@ -189,6 +190,9 @@ are carried in the response payload alongside the exit code.
   signed request is verified by the daemon; name-to-agent resolution is
   explicit (`<name>`, `<name>@<project>`, `<name>@<project>:<branch>`,
   ULID, or nickname).
+- `unregister` is terminal: it deletes the private key. A subsequent
+  `register` under the same name is a fresh identity event — new `agent_id`,
+  new keypair, no automatic resumption of prior rooms or channel state.
 
 Full architecture: [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md).
 
