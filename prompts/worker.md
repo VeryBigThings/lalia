@@ -55,3 +55,4 @@ Commit attribution:
 
 Exit protocol:
 - On permanent shutdown, run `lalia unregister`.
+- **Note**: `lalia unregister` is terminal and irrevocable. It deletes your private key and drops your registration. If you later re-register under the same name, you will receive a fresh `agent_id` and a new keypair. You will NOT automatically resume your prior room memberships or channel states; you must explicitly `lalia join` any rooms you need to re-enter.
