@@ -26,17 +26,17 @@ Bootstrap in this exact order:
 - Use `lalia tell`/`lalia ask` only for private 1:1 side conversations.
 - Report checkpoints in-room:
   - start: when you begin (`lalia post <slug> "starting on X"`)
-  - blocker: when you hit one (`lalia post <slug> "blocked on: ..."` and `lalia task status <slug> blocked`)
-  - ready: when you have a reviewable branch (`lalia task status <slug> ready` + `lalia post <slug> "ready for review"`)
+  - blocker: when you hit one (`lalia post <slug> "blocked on: ..."` and `lalia task set-status <slug> blocked`)
+  - ready: when you have a reviewable branch (`lalia task set-status <slug> ready` + `lalia post <slug> "ready for review"`)
 - Scope changes go back to the supervisor in-room; do not silently expand your footprint.
 
 ### Your status transitions
 
     open → in-progress   (task claim)
-    in-progress → ready|blocked   (task status, own row only)
-    in-progress → in-progress (resume after blocker: task status in-progress)
+    in-progress → ready|blocked   (task set-status, own row only)
+    in-progress → in-progress (resume after blocker: task set-status in-progress)
 
-Supervisors close the loop with `task status merged` and `rooms gc`.
+Supervisors close the loop with `task set-status merged` and `rooms gc`.
 
 ### Other rules
 

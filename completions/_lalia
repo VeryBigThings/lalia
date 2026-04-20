@@ -133,7 +133,7 @@ _lalia() {
                     ;;
                 task)
                     _arguments -C \
-                        '1:subcommand:(publish bulletin claim status unassign reassign unpublish show list handoff)' \
+                        '1:subcommand:(publish bulletin claim set-status unassign reassign unpublish show list handoff)' \
                         '*:: :->taskargs'
                     case "$state" in
                         taskargs)
@@ -146,10 +146,10 @@ _lalia() {
                                 bulletin)
                                     _arguments '--project[id]:id:'
                                     ;;
-                                status)
+                                set-status)
                                     _arguments \
                                         '1:slug:' \
-                                        '2:status:(open assigned in-progress ready blocked merged)' \
+                                        '2:status:(in-progress ready blocked merged)' \
                                         '--project[id]:id:'
                                     ;;
                                 claim)

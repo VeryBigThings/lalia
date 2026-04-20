@@ -373,56 +373,60 @@ func cmdRoomsGC(args []string) {
 }
 
 func cmdRoom(args []string) {
-	if len(args) < 1 {
+	pos := positionalArgs(args, nil, map[string]struct{}{"--as": {}, "--desc": {}})
+	if len(pos) < 1 {
 		fmt.Fprintln(os.Stderr, "usage: lalia room create <name> [--desc <text>]")
 		os.Exit(1)
 	}
-	switch args[0] {
+	switch pos[0] {
 	case "create":
-		if len(args) < 2 {
+		if len(pos) < 2 {
 			fmt.Fprintln(os.Stderr, "usage: lalia room create <name> [--desc <text>]")
 			os.Exit(1)
 		}
 		from := mustCaller(args)
-		name := args[1]
+		name := pos[1]
 		desc := parseFlag(args, "--desc")
 		resp, err := request("room_create", map[string]any{"from": from, "name": name, "desc": desc})
 		handle(resp, err, func(data any) {
 			fmt.Println(data.(map[string]any)["name"])
 		})
 	default:
-		fmt.Fprintf(os.Stderr, "unknown room subcommand: %s\n", args[0])
+		fmt.Fprintf(os.Stderr, "unknown room subcommand: %s\n", pos[0])
 		os.Exit(1)
 	}
 }
 
 func cmdJoin(args []string) {
-	if len(args) < 1 {
+	pos := positionalArgs(args, nil, map[string]struct{}{"--as": {}})
+	if len(pos) < 1 {
 		fmt.Fprintln(os.Stderr, "usage: lalia join <room>")
 		os.Exit(1)
 	}
 	from := mustCaller(args)
-	resp, err := request("join", map[string]any{"from": from, "room": args[0]})
+	resp, err := request("join", map[string]any{"from": from, "room": pos[0]})
 	handle(resp, err, nil)
 }
 
 func cmdLeave(args []string) {
-	if len(args) < 1 {
+	pos := positionalArgs(args, nil, map[string]struct{}{"--as": {}})
+	if len(pos) < 1 {
 		fmt.Fprintln(os.Stderr, "usage: lalia leave <room>")
 		os.Exit(1)
 	}
 	from := mustCaller(args)
-	resp, err := request("leave", map[string]any{"from": from, "room": args[0]})
+	resp, err := request("leave", map[string]any{"from": from, "room": pos[0]})
 	handle(resp, err, nil)
 }
 
 func cmdParticipants(args []string) {
-	if len(args) < 1 {
+	pos := positionalArgs(args, nil, map[string]struct{}{"--as": {}})
+	if len(pos) < 1 {
 		fmt.Fprintln(os.Stderr, "usage: lalia participants <room>")
 		os.Exit(1)
 	}
 	from := mustCaller(args)
-	resp, err := request("participants", map[string]any{"from": from, "room": args[0]})
+	resp, err := request("participants", map[string]any{"from": from, "room": pos[0]})
 	handle(resp, err, func(data any) {
 		m := data.(map[string]any)
 		rows, _ := m["members"].([]any)
@@ -434,12 +438,13 @@ func cmdParticipants(args []string) {
 }
 
 func cmdPost(args []string) {
-	if len(args) < 2 {
+	pos := positionalArgs(args, nil, map[string]struct{}{"--as": {}})
+	if len(pos) < 2 {
 		fmt.Fprintln(os.Stderr, "usage: lalia post <room> <msg>")
 		os.Exit(1)
 	}
 	from := mustCaller(args)
-	room, body := args[0], args[1]
+	room, body := pos[0], pos[1]
 	resp, err := request("post", map[string]any{"from": from, "room": room, "body": body})
 	handle(resp, err, func(data any) {
 		m := data.(map[string]any)
@@ -450,12 +455,13 @@ func cmdPost(args []string) {
 // cmdTell: lalia tell <peer> <msg>
 // Fire-and-forget. Returns immediately.
 func cmdTell(args []string) {
-	if len(args) < 2 {
+	pos := positionalArgs(args, nil, map[string]struct{}{"--as": {}})
+	if len(pos) < 2 {
 		fmt.Fprintln(os.Stderr, "usage: lalia tell <peer> <msg>")
 		os.Exit(1)
 	}
 	from := mustCaller(args)
-	peer, body := args[0], args[1]
+	peer, body := pos[0], pos[1]
 	resp, err := request("tell", map[string]any{"from": from, "peer": peer, "body": body})
 	handle(resp, err, func(data any) {
 		m := data.(map[string]any)
@@ -467,12 +473,13 @@ func cmdTell(args []string) {
 // Client-side composition: tell + read. Sends, then blocks up to timeout
 // waiting for a reply from the same peer.
 func cmdAsk(args []string) {
-	if len(args) < 2 {
+	pos := positionalArgs(args, nil, map[string]struct{}{"--as": {}, "--timeout": {}})
+	if len(pos) < 2 {
 		fmt.Fprintln(os.Stderr, "usage: lalia ask <peer> <msg> [--timeout N]")
 		os.Exit(1)
 	}
 	from := mustCaller(args)
-	peer, body := args[0], args[1]
+	peer, body := pos[0], pos[1]
 	timeout := parseIntFlag(args, "--timeout", 300)
 
 	// Step 1: tell.
@@ -497,12 +504,13 @@ func cmdAsk(args []string) {
 // Consumes oldest pending message. target is a peer by default; pass --room
 // to read from a room with the same name instead.
 func cmdRead(args []string) {
-	if len(args) < 1 {
+	pos := positionalArgs(args, map[string]struct{}{"--room": {}}, map[string]struct{}{"--as": {}, "--timeout": {}})
+	if len(pos) < 1 {
 		fmt.Fprintln(os.Stderr, "usage: lalia read <peer|room> [--room] [--timeout N]")
 		os.Exit(1)
 	}
 	from := mustCaller(args)
-	target := args[0]
+	target := pos[0]
 	timeout := parseIntFlag(args, "--timeout", 300)
 	asRoom := parseBoolFlag(args, "--room")
 
@@ -531,12 +539,13 @@ func cmdRead(args []string) {
 
 // cmdPeek: lalia peek <target> [--room]
 func cmdPeek(args []string) {
-	if len(args) < 1 {
+	pos := positionalArgs(args, map[string]struct{}{"--room": {}}, map[string]struct{}{"--as": {}})
+	if len(pos) < 1 {
 		fmt.Fprintln(os.Stderr, "usage: lalia peek <peer|room> [--room]")
 		os.Exit(1)
 	}
 	from := mustCaller(args)
-	target := args[0]
+	target := pos[0]
 	asRoom := parseBoolFlag(args, "--room")
 
 	req := map[string]any{"from": from}
@@ -592,12 +601,13 @@ func cmdChannels(args []string) {
 
 // cmdHistory: lalia history <target> [--room] [--since N] [--limit N]
 func cmdHistory(args []string) {
-	if len(args) < 1 {
+	pos := positionalArgs(args, map[string]struct{}{"--room": {}}, map[string]struct{}{"--as": {}, "--since": {}, "--limit": {}})
+	if len(pos) < 1 {
 		fmt.Fprintln(os.Stderr, "usage: lalia history <peer|room> [--room] [--since N] [--limit N]")
 		os.Exit(1)
 	}
 	from := mustCaller(args)
-	target := args[0]
+	target := pos[0]
 	since := parseIntFlag(args, "--since", 0)
 	limit := parseIntFlag(args, "--limit", 0)
 	asRoom := parseBoolFlag(args, "--room")
@@ -627,25 +637,29 @@ func cmdHistory(args []string) {
 // cmdTask routes task subcommands. The project is auto-detected from the
 // caller's git environment unless --project is specified explicitly.
 func cmdTask(args []string) {
-	if len(args) < 1 {
-		fmt.Fprintln(os.Stderr, "usage: lalia task <publish|bulletin|claim|status|unassign|reassign|unpublish|show|list|handoff>")
+	pos := positionalArgs(
+		args,
+		map[string]struct{}{"--force": {}, "--wipe-worktree": {}, "--evict-owner": {}},
+		map[string]struct{}{"--as": {}, "--project": {}, "--file": {}},
+	)
+	if len(pos) < 1 {
+		fmt.Fprintln(os.Stderr, "usage: lalia task <publish|bulletin|claim|set-status|unassign|reassign|unpublish|show|list|handoff>")
 		os.Exit(1)
 	}
-	sub := args[0]
-	rest := args[1:]
+	sub := pos[0]
 
 	info := DetectAgentInfo(AgentInfo{})
 	detectedProject := projectID(info.RepoURL, info.Project)
 
-	proj := parseFlag(rest, "--project")
+	proj := parseFlag(args, "--project")
 	if proj == "" {
 		proj = detectedProject
 	}
-	from := mustCaller(rest)
+	from := mustCaller(args)
 
 	switch sub {
 	case "publish":
-		payloadPath := parseFlag(rest, "--file")
+		payloadPath := parseFlag(args, "--file")
 		var raw []byte
 		var err error
 		if payloadPath == "" || payloadPath == "-" {
@@ -718,11 +732,11 @@ func cmdTask(args []string) {
 		})
 
 	case "claim":
-		if len(rest) < 1 || rest[0] == "" || rest[0][0] == '-' {
+		if len(pos) < 2 || pos[1] == "" {
 			fmt.Fprintln(os.Stderr, "usage: lalia task claim <slug> [--project <id>]")
 			os.Exit(1)
 		}
-		slug := rest[0]
+		slug := pos[1]
 		resp, err := request("task_claim", map[string]any{
 			"from": from, "project": proj, "slug": slug,
 		})
@@ -734,12 +748,12 @@ func cmdTask(args []string) {
 			}
 		})
 
-	case "status":
-		if len(rest) < 2 {
-			fmt.Fprintln(os.Stderr, "usage: lalia task status <slug> <in-progress|ready|blocked|merged> [--project <id>]")
+	case "set-status":
+		if len(pos) < 3 {
+			fmt.Fprintln(os.Stderr, "usage: lalia task set-status <slug> <in-progress|ready|blocked|merged> [--project <id>]")
 			os.Exit(1)
 		}
-		slug, status := rest[0], rest[1]
+		slug, status := pos[1], pos[2]
 		resp, err := request("task_status", map[string]any{
 			"from": from, "project": proj, "slug": slug, "status": status,
 		})
@@ -749,11 +763,11 @@ func cmdTask(args []string) {
 		})
 
 	case "unassign":
-		if len(rest) < 1 || rest[0] == "" || rest[0][0] == '-' {
+		if len(pos) < 2 || pos[1] == "" {
 			fmt.Fprintln(os.Stderr, "usage: lalia task unassign <slug> [--project <id>]")
 			os.Exit(1)
 		}
-		slug := rest[0]
+		slug := pos[1]
 		resp, err := request("task_unassign", map[string]any{
 			"from": from, "project": proj, "slug": slug,
 		})
@@ -763,11 +777,11 @@ func cmdTask(args []string) {
 		})
 
 	case "reassign":
-		if len(rest) < 2 {
+		if len(pos) < 3 {
 			fmt.Fprintln(os.Stderr, "usage: lalia task reassign <slug> <agent> [--project <id>]")
 			os.Exit(1)
 		}
-		slug, owner := rest[0], rest[1]
+		slug, owner := pos[1], pos[2]
 		resp, err := request("task_reassign", map[string]any{
 			"from": from, "project": proj, "slug": slug, "owner": owner,
 		})
@@ -777,18 +791,18 @@ func cmdTask(args []string) {
 		})
 
 	case "unpublish":
-		if len(rest) < 1 || rest[0] == "" || rest[0][0] == '-' {
+		if len(pos) < 2 || pos[1] == "" {
 			fmt.Fprintln(os.Stderr, "usage: lalia task unpublish <slug> [--force] [--wipe-worktree] [--evict-owner] [--project <id>]")
 			os.Exit(1)
 		}
-		slug := rest[0]
+		slug := pos[1]
 		resp, err := request("task_unpublish", map[string]any{
 			"from":          from,
 			"project":       proj,
 			"slug":          slug,
-			"force":         parseBoolFlag(rest, "--force"),
-			"wipe_worktree": parseBoolFlag(rest, "--wipe-worktree"),
-			"evict_owner":   parseBoolFlag(rest, "--evict-owner"),
+			"force":         parseBoolFlag(args, "--force"),
+			"wipe_worktree": parseBoolFlag(args, "--wipe-worktree"),
+			"evict_owner":   parseBoolFlag(args, "--evict-owner"),
 		})
 		handle(resp, err, func(data any) {
 			m := data.(map[string]any)
@@ -805,8 +819,8 @@ func cmdTask(args []string) {
 
 	case "show":
 		slug := ""
-		if len(rest) >= 1 && rest[0] != "" && rest[0][0] != '-' {
-			slug = rest[0]
+		if len(pos) >= 2 && pos[1] != "" {
+			slug = pos[1]
 		}
 		resp, err := request("task_show", map[string]any{
 			"from": from, "project": proj, "slug": slug,
@@ -845,11 +859,11 @@ func cmdTask(args []string) {
 		})
 
 	case "handoff":
-		if len(rest) < 1 || rest[0] == "" || rest[0][0] == '-' {
+		if len(pos) < 2 || pos[1] == "" {
 			fmt.Fprintln(os.Stderr, "usage: lalia task handoff <new-supervisor> [--project <id>]")
 			os.Exit(1)
 		}
-		newSup := rest[0]
+		newSup := pos[1]
 		resp, err := request("task_handoff", map[string]any{
 			"from": from, "project": proj, "to": newSup,
 		})
@@ -1047,4 +1061,33 @@ func parseIntFlag(args []string, name string, def int) int {
 		return def
 	}
 	return n
+}
+
+func positionalArgs(args []string, boolFlags map[string]struct{}, valueFlags map[string]struct{}) []string {
+	out := make([]string, 0, len(args))
+	skipNext := false
+	stopFlags := false
+	for _, a := range args {
+		if skipNext {
+			skipNext = false
+			continue
+		}
+		if stopFlags {
+			out = append(out, a)
+			continue
+		}
+		if a == "--" {
+			stopFlags = true
+			continue
+		}
+		if _, ok := boolFlags[a]; ok {
+			continue
+		}
+		if _, ok := valueFlags[a]; ok {
+			skipNext = true
+			continue
+		}
+		out = append(out, a)
+	}
+	return out
 }

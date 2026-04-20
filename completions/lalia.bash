@@ -49,13 +49,13 @@ _lalia() {
             ;;
         task)
             if [[ $COMP_CWORD -eq 2 ]]; then
-                COMPREPLY=( $(compgen -W "publish bulletin claim status unassign reassign unpublish show list handoff" -- "$cur") )
+                COMPREPLY=( $(compgen -W "publish bulletin claim set-status unassign reassign unpublish show list handoff" -- "$cur") )
                 return
             fi
             case "$sub" in
-                status)
+                set-status)
                     if [[ $COMP_CWORD -eq 4 ]]; then
-                        COMPREPLY=( $(compgen -W "open assigned in-progress ready blocked merged" -- "$cur") )
+                        COMPREPLY=( $(compgen -W "in-progress ready blocked merged" -- "$cur") )
                     else
                         COMPREPLY=( $(compgen -W "--project" -- "$cur") )
                     fi
