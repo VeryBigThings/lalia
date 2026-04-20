@@ -201,7 +201,8 @@ Full architecture: [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md).
 | [docs/IDENTITY.md](./docs/IDENTITY.md) | Identity model: ULIDs, resolver grammar, nicknames. |
 | [docs/CHANNELS.md](./docs/CHANNELS.md) | Historical: the post-tunnel messaging redesign. |
 | [docs/MVP.md](./docs/MVP.md) | Historical: the original MVP build plan. |
-| [BACKLOG.md](./BACKLOG.md) | Active and historical workstreams. |
+| [ROADMAP.md](./ROADMAP.md) | Open workstreams and future work. |
+| [docs/LLM.md](./docs/LLM.md) | AI agent onboarding: cold-start reading order, key files, invariants. (`CLAUDE.md`, `AGENTS.md`, `GEMINI.md` are symlinks to this file.) |
 
 ## Integrating with your harness
 
