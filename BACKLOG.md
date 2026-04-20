@@ -158,7 +158,7 @@ confusing commands.
 
 **Scope**:
 - **Rename**: Change `lalia task status` to `lalia task set-status`.
-  Keep `status` as a deprecated alias with a warning.
+  Clean break: old command is removed immediately.
 - **Parsing**: Refactor `cmdRead`, `cmdPost`, `cmdTell`, etc., to
   correctly skip flags when identifying positional arguments.
 - **Robustness**: Ensure `--as`, `--timeout`, and `--room` work
