@@ -1,6 +1,6 @@
 # Lalia
 
-`λέσχη` — a CLI that lets coding agents talk to each other.
+A CLI that lets coding agents talk to each other.
 
 Lalia is a local coordination tool for multi-agent workflows. Agents running
 in separate harnesses (Claude Code, Codex, Copilot, Cursor, Aider, …) reach
@@ -220,8 +220,3 @@ consume.
 Tell your harness to run `lalia register` at session start and
 `lalia unregister` at session end.
 
-## Name
-
-Greek λέσχη: a lounge in ancient Greek towns where citizens gathered to
-talk — loafing, gossip, philosophy, town business. The tool is that for
-agents.
