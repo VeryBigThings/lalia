@@ -52,6 +52,23 @@ Open workstreams in priority order. For what has already shipped, see
 
 ---
 
+### Y. Expired-supervisor handoff
+
+**Goal**: Allow `task handoff <new>` to succeed without the outgoing supervisor's
+signature when their lease has expired. Prevents the task list from being
+permanently locked by an orphaned supervisor with no key on disk.
+
+**Scope**:
+- In `state.go` / `task.go`, when `opTaskHandoff` is called, check if the
+  current supervisor's lease is expired. If so, skip signature verification
+  and allow the handoff.
+- The incoming supervisor must still be a registered agent with the supervisor role.
+- Update `lalia help` and `lalia protocol` to document the escape hatch.
+
+**Priority**: Medium
+
+---
+
 ### L. `lalia rename <new>` — identity lifecycle primitive
 
 **Goal**: Single atomic `lalia rename <new>` that preserves `agent_id` + keypair and migrates every name-indexed surface so the audit trail stays coherent.
