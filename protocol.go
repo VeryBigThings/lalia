@@ -39,8 +39,10 @@ const (
 	CodeNotYourTurn  = 4
 	CodeNotFound     = 5
 	CodeUnauthorized    = 6 // signature rejected or caller not registered
-	CodeSupervisorBusy = 7 // supervisor still owns a non-empty task list; handoff first
-	CodeProjectIdentityMismatch = 8 // publish payload project does not match caller's registered project
+	CodeSupervisorBusy          = 7  // supervisor still owns a non-empty task list; handoff first
+	CodeProjectIdentityMismatch = 8  // publish payload project does not match caller's registered project
+	CodePIDConflict             = 9  // PID already registered as a different live agent
+	CodeSessionConflict         = 10 // re-registration conflicts with a live session's harness or CWD
 )
 
 func errorResponse(code int, reason, retryHint, message string, context map[string]any) Response {

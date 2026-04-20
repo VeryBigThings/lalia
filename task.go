@@ -994,6 +994,14 @@ func (s *State) opTaskClaim(req Request) Response {
 	}
 
 	s.mu.Lock()
+	// Role conflict: supervisors publish and oversee; claiming is a worker operation.
+	if caller := s.agentByName(from); caller != nil && caller.Role == "supervisor" {
+		s.mu.Unlock()
+		return errorResponse(CodeUnauthorized, "supervisor_cannot_claim",
+			"register with --role worker to claim tasks; supervisors publish and supervise",
+			"supervisor "+from+" may not claim tasks",
+			map[string]any{"from": from, "role": caller.Role})
+	}
 	tl := s.tasks[pid]
 	if tl == nil {
 		s.mu.Unlock()

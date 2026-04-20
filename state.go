@@ -416,8 +416,41 @@ func (s *State) opRegister(req Request) Response {
 
 	now := time.Now()
 	s.mu.Lock()
+	// PID locking: one OS process may hold at most one registered identity at a time.
+	// If the incoming PID is already bound to a *different* live agent, reject.
+	if pid != 0 {
+		for _, existing := range s.agents {
+			if existing.PID == pid && existing.Name != name && now.Before(existing.ExpiresAt) {
+				s.mu.Unlock()
+				return errorResponse(CodePIDConflict, "pid_in_use",
+					"unregister "+existing.Name+" first, or run lalia register from a separate process",
+					fmt.Sprintf("PID %d is already registered as agent %q", pid, existing.Name),
+					map[string]any{"pid": pid, "registered_as": existing.Name, "agent_id": existing.AgentID})
+			}
+		}
+	}
 	// Check if this name is already registered; reuse same AgentID if so.
 	a := s.agentByName(name)
+	// Session conflict: if the existing lease is still live and the new
+	// registration arrives from a different harness or CWD, the original
+	// session would be silently hijacked. Reject so the identity stays bound
+	// to the harness session that created it.
+	if a != nil && now.Before(a.ExpiresAt) {
+		if info.Harness != "" && a.Harness != "" && info.Harness != a.Harness {
+			s.mu.Unlock()
+			return errorResponse(CodeSessionConflict, "session_conflict",
+				"wait for lease expiry or run lalia unregister first",
+				fmt.Sprintf("agent %q is live in harness %q; new registration from %q conflicts", name, a.Harness, info.Harness),
+				map[string]any{"name": name, "registered_harness": a.Harness, "new_harness": info.Harness})
+		}
+		if info.CWD != "" && a.CWD != "" && info.CWD != a.CWD {
+			s.mu.Unlock()
+			return errorResponse(CodeSessionConflict, "session_conflict",
+				"wait for lease expiry or run lalia unregister first",
+				fmt.Sprintf("agent %q is live in %q; new registration from %q conflicts", name, a.CWD, info.CWD),
+				map[string]any{"name": name, "registered_cwd": a.CWD, "new_cwd": info.CWD})
+		}
+	}
 	if a == nil {
 		a = &Agent{
 			AgentID:   newAgentID(),
