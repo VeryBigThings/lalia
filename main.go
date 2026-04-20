@@ -140,7 +140,7 @@ Tasks (supervisor publishes, workers pull):
   lalia task publish --file <payload.json>   one call: worktrees + rooms + bundles
   lalia task bulletin [--project <id>]       list open tasks workers can claim
   lalia task claim <slug> [--project <id>]   atomic: owner=self, status=in-progress, join room
-  lalia task status <slug> <in-progress|ready|blocked|merged> [--project <id>]
+  lalia task set-status <slug> <in-progress|ready|blocked|merged> [--project <id>]
   lalia task unassign <slug> [--project <id>]
   lalia task reassign <slug> <agent> [--project <id>]
   lalia task unpublish <slug> [--force] [--wipe-worktree] [--evict-owner] [--project <id>]

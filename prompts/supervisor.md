@@ -58,14 +58,14 @@ Per-workstream atomicity: if one slug fails (branch already checked out elsewher
 - Progress updates, blockers, and questions flow through each workstream's room. Read with `lalia read-any`; reply with `lalia post <slug> "..."`.
 - Resolve contracts by posting a follow-up message in the room that references (but does not mutate) the original bundle. If the contract spec itself changes meaningfully, treat it as a scope change: unassign/reassign/republish as appropriate.
 - Use `lalia tell`/`lalia ask` only for private 1:1 side conversations that are not about a specific workstream.
-- When a workstream is ready for merge, the worker flips status to `ready`. You verify, merge, then `lalia task status <slug> merged`.
+- When a workstream is ready for merge, the worker flips status to `ready`. You verify, merge, then `lalia task set-status <slug> merged`.
 - After merges accumulate, run `lalia rooms gc` to archive rooms for merged tasks.
 
 ### Status transitions you own
 
     open → in-progress   (worker:     task claim)
-    in-progress → *      (owner:      task status ready|blocked)
-    * → merged           (supervisor: task status merged)
+    in-progress → *      (owner:      task set-status ready|blocked)
+    * → merged           (supervisor: task set-status merged)
     * → open             (supervisor: task unassign)
     * → assigned         (supervisor: task reassign)
 

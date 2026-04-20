@@ -131,7 +131,7 @@ agents deregister.
     lalia read <room> --room [--timeout N]        # consume from room
     lalia peek <room> --room                      # inspect room mailbox
 
-Rooms are never auto-deleted. "task unassign" and "task status merged" leave
+Rooms are never auto-deleted. "task unassign" and "task set-status merged" leave
 the slug room live so reviewers and reassignees can keep the thread going.
 When a workstream is truly done, the project supervisor runs "lalia rooms gc"
 to archive (no new posts; history preserved) every merged-task room in
@@ -278,7 +278,7 @@ handoff first.
     lalia task unassign <slug>
     lalia task reassign <slug> <agent>
     lalia task unpublish <slug> [--force]
-    lalia task status <slug> merged
+    lalia task set-status <slug> merged
     lalia task handoff <new-supervisor>
     lalia task show [<slug>] [--project <id>]    (anyone; defaults to cwd project)
 
@@ -286,7 +286,7 @@ handoff first.
 
     lalia task bulletin [--project <id>]           (open tasks in this project)
     lalia task claim <slug>                        (open → in-progress, auto-joins room, surfaces bundle)
-    lalia task status <slug> in-progress|ready|blocked   (own row only)
+    lalia task set-status <slug> in-progress|ready|blocked   (own row only)
     lalia task list                                (lists where caller is supervisor or owner)
 
 ### Publish payload shape
@@ -319,8 +319,8 @@ The daemon runs git worktree add on your behalf under
 ### Task status transitions
 
     open → in-progress   (worker:     task claim)
-    in-progress → *      (owner:      task status ready|blocked)
-    * → merged           (supervisor: task status merged)
+    in-progress → *      (owner:      task set-status ready|blocked)
+    * → merged           (supervisor: task set-status merged)
     * → open             (supervisor: task unassign)
     * → assigned         (supervisor: task reassign; forces new owner)
 
