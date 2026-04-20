@@ -4,7 +4,7 @@ Active and historical workstreams. Rationale, design sketches, and
 the state of shipped vs open work. `BACKLOG.md` is planning and
 history; ARCHITECTURE.md and IDEA.md describe the shipped system.
 
-## Current state (snapshot at commit `66246d7`)
+## Current state (snapshot at commit `588c66c`)
 
 **Shipped on main.** The channel-based messaging layer, rooms,
 SQLite write queue + mailbox persistence, Ed25519-signed identity,
@@ -21,7 +21,7 @@ Test suite: ~107 tests across 13 files via `make test`; runs in
 **Active branches (not on main).** None at snapshot time.
 
 **Currently open work.** See the workstream catalog further down.
-The live queue is M / T, plus L and S as future items, plus
+The live queue is M / T / W, plus L and S as future items, plus
 multi-project workspace isolation which has no design doc yet.
 
 ### Historical note on parallel agent batches
