@@ -67,6 +67,30 @@ grow indefinitely.
 
 ---
 
+### W. Registry eviction of expired agents
+
+**Goal**: Automatically evict agents whose lease has expired from the registry,
+freeing their name and releasing any resources they hold.
+
+**Background**: Currently, lease expiry only removes an agent from the active
+list (`lalia agents` stops showing them). The registry entry persists
+indefinitely — the name stays reserved, the keypair stays on disk, and a
+supervisor keeps holding the supervisor slot. The only way to clean up is
+manual intervention (editing task-list.json + daemon reload).
+
+**Scope**:
+- On daemon boot and/or periodically, evict registry entries whose
+  `last_seen_at` is older than the lease TTL (60 min).
+- Eviction should: remove the registry entry, release the supervisor slot if
+  held, and optionally notify any rooms the agent was in.
+- Consider a grace period (e.g. 2× TTL) before eviction to tolerate transient
+  disconnects.
+- Update `lalia help` and `lalia protocol`.
+
+**Priority**: Medium. Related to Y (expired-supervisor handoff) but broader.
+
+---
+
 ### Y. Expired-supervisor handoff
 
 **Goal**: Allow `task handoff <new>` to succeed without the outgoing supervisor's
