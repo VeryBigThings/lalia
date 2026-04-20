@@ -22,6 +22,8 @@ func main() {
 		runDaemon()
 	case "register":
 		cmdRegister(os.Args[2:])
+	case "suggest-name":
+		cmdSuggestName(os.Args[2:])
 	case "unregister":
 		cmdUnregister(os.Args[2:])
 	case "init":
@@ -109,6 +111,7 @@ Usage:
   lalia run <peer|worker|supervisor> --copilot     [--force] [args...]
 
   lalia register [--name <name>] [--harness H] [--model M] [--project P] [--role peer|supervisor|worker]
+  lalia suggest-name [--harness H] [--project P] [--role peer|supervisor|worker]
   lalia unregister                      drop yourself from the registry
   lalia agents
   lalia channels                        list your peer-pair channels

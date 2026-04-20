@@ -26,16 +26,16 @@ func isULID(s string) bool {
 
 // AgentInfo holds auto-detected fields for a new registration.
 type AgentInfo struct {
-	Harness        string
-	Model          string
-	Project        string
-	RepoURL        string
-	RepoRoot       string // absolute path of the current worktree
-	MainRepoRoot   string // absolute path of the main worktree
-	WorktreeKind   string // main | secondary | detached | outside
-	Worktree       string
-	Branch         string
-	CWD            string
+	Harness      string
+	Model        string
+	Project      string
+	RepoURL      string
+	RepoRoot     string // absolute path of the current worktree
+	MainRepoRoot string // absolute path of the main worktree
+	WorktreeKind string // main | secondary | detached | outside
+	Worktree     string
+	Branch       string
+	CWD          string
 }
 
 // DetectAgentInfo auto-detects registration metadata from the caller's environment.
@@ -125,6 +125,71 @@ func DetectAgentInfo(overrides AgentInfo) AgentInfo {
 	info.Model = overrides.Model
 
 	return info
+}
+
+// SuggestAgentName derives a canonical default agent name from introspected
+// metadata. It is deterministic for a given cwd/harness/role and intentionally
+// favors worktree-level uniqueness to reduce default name collisions.
+func SuggestAgentName(info AgentInfo, role string) string {
+	harness := sanitizeNamePart(info.Harness)
+	if harness == "" || harness == "unknown" {
+		harness = "agent"
+	}
+
+	r := sanitizeNamePart(role)
+	scope := sanitizeNamePart(info.Worktree)
+	if scope == "" {
+		scope = sanitizeNamePart(info.Branch)
+	}
+	if scope == "" || scope == "head" {
+		scope = sanitizeNamePart(info.Project)
+	}
+	if scope == "" {
+		scope = "local"
+	}
+
+	parts := make([]string, 0, 3)
+	parts = append(parts, harness)
+	if r != "" && r != harness {
+		parts = append(parts, r)
+	}
+	if scope != "" && scope != harness && scope != r {
+		parts = append(parts, scope)
+	}
+	if len(parts) == 0 {
+		return "agent-local"
+	}
+	return strings.Join(parts, "-")
+}
+
+func sanitizeNamePart(s string) string {
+	s = strings.ToLower(strings.TrimSpace(s))
+	if s == "" {
+		return ""
+	}
+	var b strings.Builder
+	prevDash := false
+	for _, r := range s {
+		isAlpha := r >= 'a' && r <= 'z'
+		isDigit := r >= '0' && r <= '9'
+		if isAlpha || isDigit {
+			b.WriteRune(r)
+			prevDash = false
+			continue
+		}
+		if !prevDash {
+			b.WriteByte('-')
+			prevDash = true
+		}
+	}
+	out := strings.Trim(b.String(), "-")
+	if out == "" {
+		return ""
+	}
+	if len(out) > 48 {
+		out = strings.Trim(out[:48], "-")
+	}
+	return out
 }
 
 // canonicalPath returns the absolute, symlink-evaluated form of a path.

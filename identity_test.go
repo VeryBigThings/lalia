@@ -303,3 +303,32 @@ func TestAgentsOutputHasNewFields(t *testing.T) {
 		t.Fatalf("qualified missing from agents output: %+v", m)
 	}
 }
+
+func TestSuggestAgentNameUsesHarnessRoleWorktree(t *testing.T) {
+	info := AgentInfo{
+		Harness:  "codex",
+		Project:  "lalia",
+		Worktree: "canonical-naming",
+		Branch:   "feat/canonical-naming",
+	}
+
+	got := SuggestAgentName(info, "worker")
+	want := "codex-worker-canonical-naming"
+	if got != want {
+		t.Fatalf("suggested name = %q, want %q", got, want)
+	}
+}
+
+func TestSuggestAgentNameSanitizesAndFallsBack(t *testing.T) {
+	info := AgentInfo{
+		Harness: "unknown",
+		Project: "My Repo",
+		Branch:  "HEAD",
+	}
+
+	got := SuggestAgentName(info, "supervisor")
+	want := "agent-supervisor-my-repo"
+	if got != want {
+		t.Fatalf("suggested name = %q, want %q", got, want)
+	}
+}

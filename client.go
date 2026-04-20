@@ -111,27 +111,26 @@ func mustCaller(args []string) string {
 }
 
 func cmdRegister(args []string) {
-	name := parseFlag(args, "--name")
-	if name == "" {
-		name = os.Getenv("LALIA_NAME")
-	}
-	if name == "" {
-		fmt.Fprintln(os.Stderr, "--name or LALIA_NAME required")
-		os.Exit(1)
-	}
-
-	// Auto-detect identity metadata from the caller's environment
+	role := parseFlag(args, "--role")
 	info := DetectAgentInfo(AgentInfo{
 		Harness: parseFlag(args, "--harness"),
 		Model:   parseFlag(args, "--model"),
 		Project: parseFlag(args, "--project"),
 	})
 
+	name := parseFlag(args, "--name")
+	if name == "" {
+		name = os.Getenv("LALIA_NAME")
+	}
+	if name == "" {
+		name = SuggestAgentName(info, role)
+	}
+
 	reqArgs := map[string]any{
 		"name": name,
 		"pid":  os.Getpid(),
 	}
-	if role := parseFlag(args, "--role"); role != "" {
+	if role != "" {
 		reqArgs["role"] = role
 	}
 	if info.Harness != "" {
@@ -169,6 +168,16 @@ func cmdRegister(args []string) {
 	handle(resp, err, func(data any) {
 		fmt.Println(data.(map[string]any)["name"])
 	})
+}
+
+func cmdSuggestName(args []string) {
+	role := parseFlag(args, "--role")
+	info := DetectAgentInfo(AgentInfo{
+		Harness: parseFlag(args, "--harness"),
+		Model:   parseFlag(args, "--model"),
+		Project: parseFlag(args, "--project"),
+	})
+	fmt.Println(SuggestAgentName(info, role))
 }
 
 // cmdUnregister removes the caller from the registry. Signed, so it
@@ -774,12 +783,12 @@ func cmdTask(args []string) {
 		}
 		slug := rest[0]
 		resp, err := request("task_unpublish", map[string]any{
-			"from":           from,
-			"project":        proj,
-			"slug":           slug,
-			"force":          parseBoolFlag(rest, "--force"),
-			"wipe_worktree":  parseBoolFlag(rest, "--wipe-worktree"),
-			"evict_owner":    parseBoolFlag(rest, "--evict-owner"),
+			"from":          from,
+			"project":       proj,
+			"slug":          slug,
+			"force":         parseBoolFlag(rest, "--force"),
+			"wipe_worktree": parseBoolFlag(rest, "--wipe-worktree"),
+			"evict_owner":   parseBoolFlag(rest, "--evict-owner"),
 		})
 		handle(resp, err, func(data any) {
 			m := data.(map[string]any)
