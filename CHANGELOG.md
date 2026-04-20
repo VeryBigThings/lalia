@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.0] - 2026-04-20
+
+### Changed
+- **Breaking**: Renamed `lalia task status` to `lalia task set-status`. The old command is removed with no alias.
+- Fixed CLI flag-order parsing: `--as`, `--timeout`, `--room`, and other flags now work correctly regardless of position relative to positional arguments. Affects `read`, `peek`, `post`, `tell`, `ask`, `history`, `join`, `leave`, `participants`, `room`, and all `task` subcommands.
+- Documented fresh-identity re-register semantics in `lalia protocol`, `prompts/worker.md`, and `prompts/supervisor.md`: `unregister` is terminal; re-registering creates a new `agent_id` and keypair; prior room memberships are not resumed automatically.
+- Replaced `BACKLOG.md` with `ROADMAP.md` (forward-looking only). Historical shipped work remains in `CHANGELOG.md`.
+- Added `docs/LLM.md` as canonical AI agent onboarding file; `CLAUDE.md`, `AGENTS.md`, and `GEMINI.md` at repo root are symlinks to it.
+
 ## [1.3.4] - 2026-04-20
 
 ### Changed
