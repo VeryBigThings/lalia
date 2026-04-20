@@ -210,7 +210,7 @@ func detectHarness() string {
 	switch {
 	case os.Getenv("CLAUDECODE") != "" || os.Getenv("CLAUDE_CODE") != "":
 		return "claude-code"
-	case os.Getenv("CODEX") != "" || os.Getenv("OPENAI_CODEX") != "":
+	case os.Getenv("CODEX") != "" || os.Getenv("OPENAI_CODEX") != "" || os.Getenv("CODEX_HOME") != "" || os.Getenv("CODEX_LOG_DIR") != "" || os.Getenv("CODEX_CI") != "" || os.Getenv("CODEX_THREAD_ID") != "":
 		return "codex"
 	case os.Getenv("CURSOR_TRACE_ID") != "" || os.Getenv("CURSOR_SESSION_ID") != "":
 		return "cursor"
