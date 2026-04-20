@@ -293,6 +293,31 @@ to make clear that lalia-initiated agent lifecycle is the
 expected home for the assignment-push semantics removed from
 `task publish`.
 
+### T. Branch-aware task defaults
+
+**Goal**: Make the worker's arrival experience smoother by
+defaulting to the task that matches the current worktree's branch.
+
+**Context**: When a worker is launched (e.g., via `lalia run worker`), it
+is typically sitting in a secondary worktree created by the
+supervisor for a specific task. That worktree's branch usually
+matches the task's slug (or a related naming convention).
+
+**Scope**:
+- **Discovery**: `lalia task bulletin` should highlight or sort
+  the task matching the caller's current `Branch` to the top.
+- **Workflow**: `lalia task claim` (with no slug provided) should
+  default to the branch-matched slug if one exists, rather than
+  requiring the agent to explicitly parse the bulletin and type
+  the slug.
+- **Prompt**: Update `prompts/worker.md` to instruct the agent to
+  "confirm and claim the branch-matched task" as its first step.
+- **Safety**: Always confirm before claiming. If multiple tasks
+  could match or none match, fall back to the current explicit
+  bulletin flow.
+
+**Status**: Open.
+
 ### Multi-project workspace isolation
 
 **Status**: No design doc yet. Drafted when the feature becomes
