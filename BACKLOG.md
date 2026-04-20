@@ -4,15 +4,15 @@ Active and historical workstreams. Rationale, design sketches, and
 the state of shipped vs open work. `BACKLOG.md` is planning and
 history; ARCHITECTURE.md and IDEA.md describe the shipped system.
 
-## Current state (snapshot at commit `006eb30`)
+## Current state (snapshot at commit `8d43dbc`)
 
 **Shipped on main.** The channel-based messaging layer, rooms,
 SQLite write queue + mailbox persistence, Ed25519-signed identity,
 60-minute leases, harness bootstrap (`init`/`prompt`/`run`),
 decentralized peer role, supervisor/worker task primitive,
 keychain integration, structured error payloads, room transcript
-rehydration on boot, and repository-grouped agent discovery (N)
-are all shipped.
+rehydration on boot, repository-grouped agent discovery (N), and
+identity isolation safeguards (V) are all shipped.
 
 Test suite: ~98 tests across 11 files via `make test`; runs in
 ~17–18s.
@@ -139,32 +139,10 @@ project shouldn't see.
 - **N. `lalia agents` — decomposed columns + worktree-kind tracking**
   (`933a0ce` and subsequent) — repository grouping, relative last-seen
   durations, detection of main vs secondary vs outside-repo worktrees.
+- **V. Identity Isolation & Multi-Identity Protection** (`8d43dbc`)
+  — PID locking, supervisor claim blocking, and harness session binding.
 
 ## Open workstreams
-
-### V. Identity Isolation & Multi-Identity Protection
-
-**Source**: Internal incident during session. `lalia-supervisor` was
-able to register and act as multiple distinct worker identities
-from the same process tree, effectively hijacking the workflow.
-
-**Goal**: Prevent a single agent or process tree from masquerading
-as multiple registered identities.
-
-**Scope**:
-- **PID Locking**: The daemon should enforce a one-registration-per-PID
-  rule (or per-session-tree). Reject `register` if the calling PID
-  is already bound to an active registration.
-- **Role Conflict Prevention**: Block an agent from claiming a task
-  if that agent is the Supervisor of the project's task list.
-- **Registration Tokens**: Supervisors can optionally generate
-  one-time tokens for published tasks; `lalia task claim` requires
-  the token if present.
-- **Context Binding**: Tie registration to harness-specific session
-  IDs (e.g., `CLAUDE_CODE_SESSION`, `CURSOR_SESSION_ID`) to ensure
-  identity cannot be "stolen" by a different harness.
-
-**Status**: Open. Priority: High.
 
 ### U. Canonical agent naming
 

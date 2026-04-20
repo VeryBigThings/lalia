@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.0] - 2026-04-20
+
+### Added
+- Identity isolation safeguards:
+  - **PID Locking**: Prevents a single OS process from registering as multiple distinct agents.
+  - **Supervisor Claim Blocking**: Explicitly prevents supervisors from claiming tasks in lists they oversee.
+  - **Session Context Binding**: Prevents identity hijacking by binding an agent's name to its harness and CWD while the lease is live.
+- New error codes: `CodePIDConflict` (9) and `CodeSessionConflict` (10).
+
+### Changed
+- `opRegister` and `opTaskClaim` in the daemon now enforce identity isolation rules.
+
 ## [1.1.0] - 2026-04-20
 
 ### Added
