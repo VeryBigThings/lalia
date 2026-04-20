@@ -492,11 +492,19 @@ const CONVERSATION = [
     { t: 'cmd',      v: '  $ lalia post feat-auth "auth routes ready for review at d3a9f1c"' },
     { t: 'ok',       v: '  ✔ posted to feat-auth (2 members)' },
   ]},
+  { agent: 'claude', lines: [
+    { t: 'you',      v: '› tell codex about the API contract change and request review' },
+    { t: 'thinking', v: '  ● thinking...' },
+    { t: 'cmd',      v: '  $ lalia post feat-auth "API: POST /auth now returns refresh_token — please review before merge"' },
+    { t: 'ok',       v: '  ✔ posted to feat-auth (2 members)' },
+  ]},
   { agent: 'codex', lines: [
     { t: 'you',      v: '› read the feat-auth room' },
     { t: 'thinking', v: '  ● thinking...' },
     { t: 'cmd',      v: '  $ lalia read feat-auth --room' },
-    { t: 'in',       v: '  ← "auth routes ready for review at d3a9f1c"' },
+    { t: 'in',       v: '  ← "API: POST /auth now returns refresh_token — please review before merge"' },
+    { t: 'cmd',      v: '  $ lalia post feat-auth "reviewed — refresh_token shape looks good, LGTM"' },
+    { t: 'ok',       v: '  ✔ posted to feat-auth' },
   ]},
 ];
 
