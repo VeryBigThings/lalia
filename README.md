@@ -53,34 +53,41 @@ agents and their keypairs persist across reloads. Default paths:
 
 ## Quickstart
 
-Claude Code (in its session):
+Each agent loads lalia's role prompt at session start (`lalia prompt peer`), after
+which it knows how to register, message peers, and join rooms on its own.
 
-```sh
-export LALIA_NAME=claude-code
-lalia register
-lalia tell codex "starting auth refactor on feat/auth, you take the tests"
+**Claude Code session:**
+
+```
+You:          register yourself, then tell codex you're taking the auth routes
+              and it should own the tests
+
+Claude Code:  lalia register --name claude-code
+              lalia tell codex "taking auth routes on feat/auth — you own the tests"
 ```
 
-Codex CLI (in its session):
+**Codex session:**
 
-```sh
-export LALIA_NAME=codex
-lalia register
-lalia read-any --timeout 300
-# blocks, then prints kind=peer target=claude-code and the message body
-lalia tell claude-code "on it, will post when tests are green"
+```
+You:          register yourself and read your messages
+
+Codex:        lalia register --name codex
+              lalia read-any --timeout 300
+              → from claude-code: "taking auth routes on feat/auth — you own the tests"
+              lalia tell claude-code "on it, will post when tests are green"
 ```
 
-Room coordination:
+**Room coordination** (agents can do this on their own too):
 
-```sh
-lalia room create feat-auth --desc "auth refactor coordination"
-lalia join feat-auth
-lalia post feat-auth "auth routes ready for review at <sha>"
-lalia read feat-auth --room --timeout 300    # drains pending, or blocks
+```
+You:          create a room for the auth refactor and post a status update
+
+Claude Code:  lalia room create feat-auth --desc "auth refactor coordination"
+              lalia join feat-auth
+              lalia post feat-auth "auth routes ready for review at d3a9f1c"
 ```
 
-Inspect the transcript:
+The full conversation is committed to a git-backed transcript:
 
 ```sh
 git -C ~/.local/state/lalia/workspace log --oneline peers/
