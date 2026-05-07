@@ -13,6 +13,19 @@ Open workstreams in priority order. For what has already shipped, see
 
 ## Open workstreams
 
+### L-WEB-1. Landing page — fix scroll velocity of chatboxes
+
+**Priority**: Medium
+
+**Goal**: Fix the scroll/animation velocity of the chatbox demo on the landing page (verybigthings.github.io/lalia/). Current speed feels off.
+
+**Scope**:
+- Identify the scroll/animation logic for the chatbox demo on the landing page
+- Adjust velocity to feel natural and readable
+- Test across screen sizes
+
+---
+
 ### X. CLI Polish & Robustness
 
 **Priority**: High
